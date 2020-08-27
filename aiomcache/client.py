@@ -1,7 +1,7 @@
 import functools
 import re
 
-from . import constants as const
+from . import constants
 from .pool import MemcachePool
 from .exceptions import ClientException, ValidationException
 
@@ -13,7 +13,7 @@ def acquire(func):
     async def wrapper(self, *args, **kwargs):
         conn = await self._pool.acquire()
         try:
-            return (await func(self, conn, *args, **kwargs))
+            return await func(self, conn, *args, **kwargs)
         except Exception as exc:
             conn[0].set_exception(exc)
             raise
@@ -25,12 +25,14 @@ def acquire(func):
 
 class Client(object):
 
-    def __init__(self, host, port=11211, *,
-                 pool_size=2, pool_minsize=None, loop=None):
+    def __init__(
+        self, host, port=11211, *, pool_size=2, pool_minsize=None, loop=None
+    ):
         if not pool_minsize:
             pool_minsize = pool_size
         self._pool = MemcachePool(
-            host, port, minsize=pool_minsize, maxsize=pool_size, loop=loop)
+            host, port, minsize=pool_minsize, maxsize=pool_size, loop=loop
+        )
 
     # key supports ascii sans space and control chars
     # \x21 is !, right after space, and \x7e is -, right before DEL
@@ -127,9 +129,9 @@ class Client(object):
         command = b'delete ' + key + b'\r\n'
         response = await self._execute_simple_command(conn, command)
 
-        if response not in (const.DELETED, const.NOT_FOUND):
+        if response not in (constants.DELETED, constants.NOT_FOUND):
             raise ClientException('Memcached delete failed', response)
-        return response == const.DELETED
+        return response == constants.DELETED
 
     @acquire
     async def get(self, conn, key, default=None):
@@ -224,9 +226,10 @@ class Client(object):
         resp = await self._execute_simple_command(conn, cmd)
 
         if resp not in (
-            const.STORED, const.NOT_STORED, const.EXISTS, const.NOT_FOUND):
+            constants.STORED, constants.NOT_STORED, constants.EXISTS,
+            constants.NOT_FOUND):
             raise ClientException('stats {} failed'.format(command), resp)
-        return resp == const.STORED
+        return resp == constants.STORED
 
     @acquire
     async def set(self, conn, key, value, exptime=0):
@@ -325,7 +328,7 @@ class Client(object):
         delta_byte = str(delta).encode('utf-8')
         cmd = b' '.join([command, key, delta_byte]) + b'\r\n'
         resp = await self._execute_simple_command(conn, cmd)
-        if not resp.isdigit() or resp == const.NOT_FOUND:
+        if not resp.isdigit() or resp == constants.NOT_FOUND:
             raise ClientException(
                 'Memcached {} command failed'.format(str(command)), resp)
         return int(resp) if resp.isdigit() else None
@@ -383,9 +386,9 @@ class Client(object):
         _cmd = b' '.join([b'touch', key, str(exptime).encode('utf-8')])
         cmd = _cmd + b'\r\n'
         resp = await self._execute_simple_command(conn, cmd)
-        if resp not in (const.TOUCHED, const.NOT_FOUND):
+        if resp not in (constants.TOUCHED, constants.NOT_FOUND):
             raise ClientException('Memcached touch failed', resp)
-        return resp == const.TOUCHED
+        return resp == constants.TOUCHED
 
     @acquire
     async def version(self, conn):
@@ -398,7 +401,7 @@ class Client(object):
         response = await self._execute_simple_command(
             conn, command
         )
-        if not response.startswith(const.VERSION):
+        if not response.startswith(constants.VERSION):
             raise ClientException('Memcached version failed', response)
         version, number = response.split()
         return number
@@ -410,5 +413,5 @@ class Client(object):
         response = await self._execute_simple_command(
             conn, command)
 
-        if const.OK != response:
+        if constants.OK != response:
             raise ClientException('Memcached flush_all failed', response)

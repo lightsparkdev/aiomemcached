@@ -11,13 +11,6 @@ async def test_version(mcache):
     stats = await mcache.stats()
     assert version == stats[b'version']
 
-    with mock.patch.object(mcache, '_execute_simple_command') as patched:
-        fut = asyncio.Future()
-        fut.set_result(b'SERVER_ERROR error\r\n')
-        patched.return_value = fut
-        with pytest.raises(ClientException):
-            await mcache.version()
-
 
 @pytest.mark.asyncio
 async def test_flush_all(mcache):
