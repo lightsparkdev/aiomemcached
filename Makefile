@@ -5,7 +5,7 @@ doc:
 	echo "open file://`pwd`/docs/_build/html/index.html"
 
 flake:
-	flake8 aiomcache examples test_
+	flake8 aiomcache examples test_*
 
 test: flake
 	py.test tests
