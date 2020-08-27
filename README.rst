@@ -34,5 +34,5 @@ The API looks very similar to the other memcache clients:
 Requirements
 ------------
 
-- Python >= 3.3
+- Python >= 3.7
 - asyncio https://pypi.python.org/pypi/asyncio/

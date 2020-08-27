@@ -398,7 +398,6 @@ class Client(object):
         response = await self._execute_simple_command(
             conn, command
         )
-        print(type(response), response)
         if not response.startswith(const.VERSION):
             raise ClientException('Memcached version failed', response)
         version, number = response.split()
