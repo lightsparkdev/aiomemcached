@@ -406,8 +406,8 @@ class Client(object):
         )
         if not response.startswith(constants.VERSION):
             raise ClientException('Memcached version failed', response)
-        version, number = response.split()
-        return number
+        versions = response.split()
+        return versions[1]
 
     @acquire
     async def flush_all(self, conn):
