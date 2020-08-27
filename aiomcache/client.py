@@ -229,7 +229,8 @@ class Client(object):
 
         if resp not in (
             constants.STORED, constants.NOT_STORED, constants.EXISTS,
-            constants.NOT_FOUND):
+            constants.NOT_FOUND
+        ):
             raise ClientException('stats {} failed'.format(command), resp)
         return resp == constants.STORED
 
