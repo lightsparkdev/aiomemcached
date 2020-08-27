@@ -6,7 +6,7 @@ import time
 import uuid
 import docker as docker_mod
 
-import memcache
+# import memcache
 import aiomcache
 
 DEFAULT_CLIENT_PARAMS = dict(

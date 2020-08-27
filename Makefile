@@ -12,7 +12,7 @@ test: flake
 
 
 cov cover coverage: flake
-	py.test --cov=aiomcache --cov-report=html --cov-report=term-missing tests
+	py.test --cov=aiomcache --cov-report=html --cov-report=term-missing test_*
 	@echo "open file://`pwd`/htmlcov/index.html"
 
 
