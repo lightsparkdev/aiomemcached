@@ -406,7 +406,7 @@ class Client(object):
         )
         if not response.startswith(constants.VERSION):
             raise ClientException('Memcached version failed', response)
-        versions = response.split()
+        versions = response.split(maxsplit=1)
         return versions[1]
 
     @acquire
