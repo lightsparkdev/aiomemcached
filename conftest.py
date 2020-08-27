@@ -1,10 +1,10 @@
-import contextlib
+# import contextlib
 import pytest
-import socket
-import sys
-import time
-import uuid
-import docker as docker_mod
+# import socket
+# import sys
+# import time
+# import uuid
+# import docker as docker_mod
 
 # import memcache
 import aiomcache

@@ -1,9 +1,6 @@
-docker-py==1.10.6
-docutils==0.15.2
-pygments==2.3.1
+#docker-py
 pytest
 pytest-asyncio
 pytest-cov
 pytest-sugar
-# python-memcached==1.59
-flake8==3.8.3
+flake8
