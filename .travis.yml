@@ -6,6 +6,7 @@ python:
 
 services:
   - docker
+  - memcached
 
 install:
   - pip install -U setuptools
