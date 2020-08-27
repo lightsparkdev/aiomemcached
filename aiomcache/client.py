@@ -1,4 +1,3 @@
-import asyncio
 import functools
 import re
 
@@ -12,12 +11,11 @@ __all__ = ['Client']
 
 def acquire(func):
 
-    @asyncio.coroutine
     @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
-        conn = yield from self._pool.acquire()
+    async def wrapper(self, *args, **kwargs):
+        conn = await self._pool.acquire()
         try:
-            return (yield from func(self, conn, *args, **kwargs))
+            return (await func(self, conn, *args, **kwargs))
         except Exception as exc:
             conn[0].set_exception(exc)
             raise
@@ -57,25 +55,22 @@ class Client(object):
 
         return key
 
-    @asyncio.coroutine
-    def _execute_simple_command(self, conn, raw_command):
+    async def _execute_simple_command(self, conn, raw_command):
         response, line = bytearray(), b''
 
         conn.writer.write(raw_command)
-        yield from conn.writer.drain()
+        await conn.writer.drain()
 
         while not line.endswith(b'\r\n'):
-            line = yield from conn.reader.readline()
+            line = await conn.reader.readline()
             response.extend(line)
         return response[:-2]
 
-    @asyncio.coroutine
-    def close(self):
+    async def close(self):
         """Closes the sockets if its open."""
-        yield from self._pool.clear()
+        await self._pool.clear()
 
-    @asyncio.coroutine
-    def _multi_get(self, conn, *keys, with_cas=True):
+    async def _multi_get(self, conn, *keys, with_cas=True):
         # req  - get <key> [<key> ...]\r\n
         # resp - VALUE <key> <flags> <bytes> [<cas unique>]\r\n
         #        <data block>\r\n (if exists)
@@ -93,7 +88,7 @@ class Client(object):
 
         received = {}
         cas_tokens = {}
-        line = yield from conn.reader.readline()
+        line = await conn.reader.readline()
 
         while line != b'END\r\n':
             terms = line.split()
@@ -106,7 +101,7 @@ class Client(object):
                 if flags != 0:
                     raise ClientException('received non zero flags')
 
-                val = (yield from conn.reader.readexactly(length+2))[:-2]
+                val = (await conn.reader.readexactly(length+2))[:-2]
                 if key in received:
                     raise ClientException('duplicate results from server')
 
@@ -115,7 +110,7 @@ class Client(object):
             else:
                 raise ClientException('get failed', line)
 
-            line = yield from conn.reader.readline()
+            line = await conn.reader.readline()
 
         if len(received) > len(keys):
             raise ClientException('received too many responses')
@@ -132,7 +127,7 @@ class Client(object):
         assert self._validate_key(key)
 
         command = b'delete ' + key + b'\r\n'
-        response = yield from self._execute_simple_command(conn, command)
+        response = await self._execute_simple_command(conn, command)
 
         if response not in (const.DELETED, const.NOT_FOUND):
             raise ClientException('Memcached delete failed', response)
@@ -146,7 +141,7 @@ class Client(object):
         :param default: default value if there is no value.
         :return: ``bytes``, is the data for this specified key.
         """
-        values, _ = yield from self._multi_get(conn, key)
+        values, _ = await self._multi_get(conn, key)
         return values.get(key, default)
 
     @acquire
@@ -157,7 +152,7 @@ class Client(object):
         :param default: default value if there is no value.
         :return: ``bytes``, ``bytes tuple with the value and the cas
         """
-        values, cas_tokens = yield from self._multi_get(
+        values, cas_tokens = await self._multi_get(
             conn, key, with_cas=True)
         return values.get(key, default), cas_tokens.get(key)
 
@@ -170,7 +165,7 @@ class Client(object):
         :raises:``ValidationException``, ``ClientException``,
         and socket errors
         """
-        values, _ = yield from self._multi_get(conn, *keys)
+        values, _ = await self._multi_get(conn, *keys)
         return tuple(values.get(key) for key in keys)
 
     @acquire
@@ -186,7 +181,7 @@ class Client(object):
 
         result = {}
 
-        resp = yield from conn.reader.readline()
+        resp = await conn.reader.readline()
         while resp != b'END\r\n':
             terms = resp.split()
 
@@ -199,12 +194,11 @@ class Client(object):
             else:
                 raise ClientException('stats failed', resp)
 
-            resp = yield from conn.reader.readline()
+            resp = await conn.reader.readline()
 
         return result
 
-    @asyncio.coroutine
-    def _storage_command(self, conn, command, key, value,
+    async def _storage_command(self, conn, command, key, value,
                          flags=0, exptime=0, cas=None):
         # req  - set <key> <flags> <exptime> <bytes> [noreply]\r\n
         #        <data block>\r\n
@@ -229,7 +223,7 @@ class Client(object):
         if cas:
             _cmd += b' ' + str(cas).encode('utf-8')
         cmd = _cmd + b'\r\n' + value + b'\r\n'
-        resp = yield from self._execute_simple_command(conn, cmd)
+        resp = await self._execute_simple_command(conn, cmd)
 
         if resp not in (
                 const.STORED, const.NOT_STORED, const.EXISTS, const.NOT_FOUND):
@@ -248,7 +242,7 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        resp = yield from self._storage_command(
+        resp = await self._storage_command(
             conn, b'set', key, value, flags, exptime)
         return resp
 
@@ -267,7 +261,7 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        resp = yield from self._storage_command(
+        resp = await self._storage_command(
             conn, b'cas', key, value, flags, exptime, cas=cas_token)
         return resp
 
@@ -283,7 +277,7 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        return (yield from self._storage_command(
+        return (await self._storage_command(
             conn, b'add', key, value, flags, exptime))
 
     @acquire
@@ -298,7 +292,7 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        return (yield from self._storage_command(
+        return (await self._storage_command(
             conn, b'replace', key, value, flags, exptime))
 
     @acquire
@@ -312,7 +306,7 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        return (yield from self._storage_command(
+        return (await self._storage_command(
             conn, b'append', key, value, flags, exptime))
 
     @acquire
@@ -326,14 +320,13 @@ class Client(object):
         :return: ``bool``, True in case of success.
         """
         flags = 0  # TODO: fix when exception removed
-        return (yield from self._storage_command(
+        return (await self._storage_command(
             conn, b'prepend', key, value, flags, exptime))
 
-    @asyncio.coroutine
-    def _incr_decr(self, conn, command, key, delta):
+    async def _incr_decr(self, conn, command, key, delta):
         delta_byte = str(delta).encode('utf-8')
         cmd = b' '.join([command, key, delta_byte]) + b'\r\n'
-        resp = yield from self._execute_simple_command(conn, cmd)
+        resp = await self._execute_simple_command(conn, cmd)
         if not resp.isdigit() or resp == const.NOT_FOUND:
             raise ClientException(
                 'Memcached {} command failed'.format(str(command)), resp)
@@ -354,7 +347,7 @@ class Client(object):
         this value was not found
         """
         assert self._validate_key(key)
-        resp = yield from self._incr_decr(
+        resp = await self._incr_decr(
             conn, b'incr', key, increment)
         return resp
 
@@ -373,7 +366,7 @@ class Client(object):
         this value was not found
         """
         assert self._validate_key(key)
-        resp = yield from self._incr_decr(
+        resp = await self._incr_decr(
             conn, b'decr', key, decrement)
         return resp
 
@@ -391,7 +384,7 @@ class Client(object):
 
         _cmd = b' '.join([b'touch', key, str(exptime).encode('utf-8')])
         cmd = _cmd + b'\r\n'
-        resp = yield from self._execute_simple_command(conn, cmd)
+        resp = await self._execute_simple_command(conn, cmd)
         if resp not in (const.TOUCHED, const.NOT_FOUND):
             raise ClientException('Memcached touch failed', resp)
         return resp == const.TOUCHED
@@ -404,7 +397,7 @@ class Client(object):
         """
 
         command = b'version\r\n'
-        response = yield from self._execute_simple_command(
+        response = await self._execute_simple_command(
             conn, command)
         if not response.startswith(const.VERSION):
             raise ClientException('Memcached version failed', response)
@@ -415,7 +408,7 @@ class Client(object):
     def flush_all(self, conn):
         """Its effect is to invalidate all existing items immediately"""
         command = b'flush_all\r\n'
-        response = yield from self._execute_simple_command(
+        response = await self._execute_simple_command(
             conn, command)
 
         if const.OK != response:
