@@ -5,12 +5,10 @@ from . import constants as const
 from .pool import MemcachePool
 from .exceptions import ClientException, ValidationException
 
-
 __all__ = ['Client']
 
 
 def acquire(func):
-
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
         conn = await self._pool.acquire()
@@ -101,7 +99,7 @@ class Client(object):
                 if flags != 0:
                     raise ClientException('received non zero flags')
 
-                val = (await conn.reader.readexactly(length+2))[:-2]
+                val = (await conn.reader.readexactly(length + 2))[:-2]
                 if key in received:
                     raise ClientException('duplicate results from server')
 
@@ -117,7 +115,7 @@ class Client(object):
         return received, cas_tokens
 
     @acquire
-    def delete(self, conn, key):
+    async def delete(self, conn, key):
         """Deletes a key/value pair from the server.
 
         :param key: is the key to delete.
@@ -134,7 +132,7 @@ class Client(object):
         return response == const.DELETED
 
     @acquire
-    def get(self, conn, key, default=None):
+    async def get(self, conn, key, default=None):
         """Gets a single value from the server.
 
         :param key: ``bytes``, is the key for the item being fetched
@@ -145,7 +143,7 @@ class Client(object):
         return values.get(key, default)
 
     @acquire
-    def gets(self, conn, key, default=None):
+    async def gets(self, conn, key, default=None):
         """Gets a single value from the server together with the cas token.
 
         :param key: ``bytes``, is the key for the item being fetched
@@ -157,7 +155,7 @@ class Client(object):
         return values.get(key, default), cas_tokens.get(key)
 
     @acquire
-    def multi_get(self, conn, *keys):
+    async def multi_get(self, conn, *keys):
         """Takes a list of keys and returns a list of values.
 
         :param keys: ``list`` keys for the item being fetched.
@@ -169,7 +167,7 @@ class Client(object):
         return tuple(values.get(key) for key in keys)
 
     @acquire
-    def stats(self, conn, args=None):
+    async def stats(self, conn, args=None):
         """Runs a stats command on the server."""
         # req  - stats [additional args]\r\n
         # resp - STAT <name> <value>\r\n (one per result)
@@ -199,7 +197,7 @@ class Client(object):
         return result
 
     async def _storage_command(self, conn, command, key, value,
-                         flags=0, exptime=0, cas=None):
+                               flags=0, exptime=0, cas=None):
         # req  - set <key> <flags> <exptime> <bytes> [noreply]\r\n
         #        <data block>\r\n
         # resp - STORED\r\n (or others)
@@ -226,12 +224,12 @@ class Client(object):
         resp = await self._execute_simple_command(conn, cmd)
 
         if resp not in (
-                const.STORED, const.NOT_STORED, const.EXISTS, const.NOT_FOUND):
+            const.STORED, const.NOT_STORED, const.EXISTS, const.NOT_FOUND):
             raise ClientException('stats {} failed'.format(command), resp)
         return resp == const.STORED
 
     @acquire
-    def set(self, conn, key, value, exptime=0):
+    async def set(self, conn, key, value, exptime=0):
         """Sets a key to a value on the server
         with an optional exptime (0 means don't auto-expire)
 
@@ -247,7 +245,7 @@ class Client(object):
         return resp
 
     @acquire
-    def cas(self, conn, key, value, cas_token, exptime=0):
+    async def cas(self, conn, key, value, cas_token, exptime=0):
         """Sets a key to a value on the server
         with an optional exptime (0 means don't auto-expire)
         only if value hasn't change from first retrieval
@@ -266,7 +264,7 @@ class Client(object):
         return resp
 
     @acquire
-    def add(self, conn, key, value, exptime=0):
+    async def add(self, conn, key, value, exptime=0):
         """Store this data, but only if the server *doesn't* already
         hold data for this key.
 
@@ -281,7 +279,7 @@ class Client(object):
             conn, b'add', key, value, flags, exptime))
 
     @acquire
-    def replace(self, conn, key, value, exptime=0):
+    async def replace(self, conn, key, value, exptime=0):
         """Store this data, but only if the server *does*
         already hold data for this key.
 
@@ -296,7 +294,7 @@ class Client(object):
             conn, b'replace', key, value, flags, exptime))
 
     @acquire
-    def append(self, conn, key, value, exptime=0):
+    async def append(self, conn, key, value, exptime=0):
         """Add data to an existing key after existing data
 
         :param key: ``bytes``, is the key of the item.
@@ -310,7 +308,7 @@ class Client(object):
             conn, b'append', key, value, flags, exptime))
 
     @acquire
-    def prepend(self, conn, key, value, exptime=0):
+    async def prepend(self, conn, key, value, exptime=0):
         """Add data to an existing key before existing data
 
         :param key: ``bytes``, is the key of the item.
@@ -333,7 +331,7 @@ class Client(object):
         return int(resp) if resp.isdigit() else None
 
     @acquire
-    def incr(self, conn, key, increment=1):
+    async def incr(self, conn, key, increment=1):
         """Command is used to change data for some item in-place,
         incrementing it. The data for the item is treated as decimal
         representation of a 64-bit unsigned integer.
@@ -352,7 +350,7 @@ class Client(object):
         return resp
 
     @acquire
-    def decr(self, conn, key, decrement=1):
+    async def decr(self, conn, key, decrement=1):
         """Command is used to change data for some item in-place,
         decrementing it. The data for the item is treated as decimal
         representation of a 64-bit unsigned integer.
@@ -371,7 +369,7 @@ class Client(object):
         return resp
 
     @acquire
-    def touch(self, conn, key, exptime):
+    async def touch(self, conn, key, exptime):
         """The command is used to update the expiration time of
         an existing item without fetching it.
 
@@ -390,7 +388,7 @@ class Client(object):
         return resp == const.TOUCHED
 
     @acquire
-    def version(self, conn):
+    async def version(self, conn):
         """Current version of the server.
 
         :return: ``bytes``, memcached version for current the server.
@@ -398,14 +396,16 @@ class Client(object):
 
         command = b'version\r\n'
         response = await self._execute_simple_command(
-            conn, command)
+            conn, command
+        )
+        print(type(response), response)
         if not response.startswith(const.VERSION):
             raise ClientException('Memcached version failed', response)
         version, number = response.split()
         return number
 
     @acquire
-    def flush_all(self, conn):
+    async def flush_all(self, conn):
         """Its effect is to invalidate all existing items immediately"""
         command = b'flush_all\r\n'
         response = await self._execute_simple_command(
