@@ -26,7 +26,9 @@ def acquire(func):
 class Client(object):
 
     def __init__(
-        self, host, port=11211, *, pool_size=2, pool_minsize=None, loop=None
+        self, host=constants.DEFAULT_SERVER_HOST,
+        port=constants.DEFAULT_SERVER_port,
+        pool_size=2, pool_minsize=None, loop=None
     ):
         if not pool_minsize:
             pool_minsize = pool_size

@@ -9,6 +9,11 @@ import docker as docker_mod
 import memcache
 import aiomcache
 
+DEFAULT_CLIENT_PARAMS = dict(
+    host='localhost',
+    port=11211
+)
+
 
 # mcache_server_option = None
 #
@@ -111,15 +116,15 @@ import aiomcache
 #         return mcache_server_actual(*mcache_params)
 #
 #
-# @pytest.fixture
+@pytest.fixture
 # def mcache_params(mcache_server):
-#     return dict(**mcache_server['mcache_params'])
+def mcache_params():
+    # return dict(**mcache_server['mcache_params'])
+    return DEFAULT_CLIENT_PARAMS
 
 
 @pytest.fixture
 async def mcache():
-    # print("Connect to {}".format(mcache_params))
-    # client = aiomcache.Client(**mcache_params)
-    client = aiomcache.Client('localhost')
+    client = aiomcache.Client(**DEFAULT_CLIENT_PARAMS)
     yield client
     await client.close()
