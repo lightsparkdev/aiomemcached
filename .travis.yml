@@ -9,8 +9,8 @@ services:
   - memcached
 
 install:
-  - pip install -U setuptools
-  - pip install -U -r requirements.txt
+  - pip install -U -r requirements/pypi.txt
+  - pip install -U -r requirements/test.txt
   - pip install -e .
   - pip install codecov
 
