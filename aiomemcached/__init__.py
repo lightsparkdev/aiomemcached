@@ -25,7 +25,7 @@ from .exceptions import ClientException, ValidationException
 __all__ = ('Client', 'ClientException', 'ValidationException')
 
 __name__ = 'aiomemcached'
-__version__ = '0.6.0'
+__version__ = '0.7.0'
 
 __author__ = 'Nikolay Kim'
 __author_email__ = 'fafhrd91@gmail.com'
