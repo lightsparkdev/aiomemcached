@@ -1,7 +1,6 @@
 [run]
-branch = True
-source = aiomcache, tests
-omit = site-packages
+source = aiomemcached
+omit = setup.py,conftest.py,test_*,venv*
 
 [html]
 directory = htmlcov
