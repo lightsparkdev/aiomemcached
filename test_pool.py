@@ -1,8 +1,8 @@
 import random
 import asyncio
 import pytest
-from aiomcache.pool import MemcachePool, _connection
-from aiomcache.client import acquire
+from aiomemcached.pool import MemcachePool, _connection
+from aiomemcached.client import acquire
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ import pytest
 # import docker as docker_mod
 
 # import memcache
-import aiomcache
+import aiomemcached
 
 DEFAULT_CLIENT_PARAMS = dict(
     host='localhost',
@@ -125,6 +125,6 @@ def mcache_params():
 
 @pytest.fixture
 async def mcache():
-    client = aiomcache.Client(**DEFAULT_CLIENT_PARAMS)
+    client = aiomemcached.Client(**DEFAULT_CLIENT_PARAMS)
     yield client
     await client.close()

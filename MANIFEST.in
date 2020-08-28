@@ -1,5 +1,5 @@
 include LICENSE.txt
 include CHANGES.rst
 include README.rst
-graft aiomcache
+graft aiomemcached
 global-exclude *.pyc *.swp

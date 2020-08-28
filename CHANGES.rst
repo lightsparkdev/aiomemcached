@@ -3,6 +3,7 @@ CHANGES
 
 0.7.0 (2020-08-xx)
 ------------------
+- Change pypi packages name to aiomemcached
 - Drop python 3.4-3.6 support
 - Add python 3.7+ support
 

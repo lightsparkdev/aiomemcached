@@ -1,5 +1,5 @@
-memcached client for asyncio
-============================
+AioMemcached
+============
 
 A pure python asyncio memcached client, fork from aiomcache.
 
@@ -7,26 +7,36 @@ A pure python asyncio memcached client, fork from aiomcache.
    :target: https://travis-ci.org/aio-libs/aiomcache
 
 
-Getting started
----------------
+Install
+-------
 
-The API looks very similar to the other memcache clients:
+.. code-block:: shell
+
+    pip install -U aiomemcached
+
+Usage
+-----
+
+A simple example.
 
 .. code:: python
 
     import asyncio
-    import aiomcache
+    import aiomemcached
 
-    async def hello_aiomcache():
-        mc = aiomcache.Client("127.0.0.1", 11211, loop=loop)
-        await mc.set(b"some_key", b"Some value")
-        value = await mc.get(b"some_key")
+
+    async def example():
+        c = aiomemcached.Client()
+        await c.set(b"some_key", b"Some value")
+        value = await c.get(b"some_key")
         print(value)
-        values = await mc.multi_get(b"some_key", b"other_key")
+        values = await c.multi_get(b"some_key", b"other_key")
         print(values)
-        await mc.delete(b"another_key")
+        await c.delete(b"another_key")
 
-    asyncio.run(hello_aiomcache())
+
+    asyncio.run(example())
+
 
 
 Requirements

@@ -11,7 +11,7 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
-import aiomcache as module
+import aiomemcached as module
 
 here = path.abspath(path.dirname(__file__))
 

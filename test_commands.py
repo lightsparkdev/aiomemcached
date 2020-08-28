@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from unittest import mock
 
-from aiomcache.exceptions import ClientException, ValidationException
+from aiomemcached.exceptions import ClientException, ValidationException
 
 
 @pytest.mark.asyncio
