@@ -1,11 +1,18 @@
 AioMemcached
 ============
 
-A pure python asyncio memcached client, fork from aiomcache.
+A pure-Python(3.7+) asyncio memcached client, fork from aiomcache.
 
-.. image:: https://travis-ci.org/aio-libs/aiomcache.svg?branch=master
-   :target: https://travis-ci.org/aio-libs/aiomcache
-
+.. image:: https://travis-ci.org/rexzhang/aiomemcached.svg?branch=master
+    :target: https://travis-ci.org/rexzhang/aiomemcached
+.. image:: https://img.shields.io/coveralls/rexzhang/aiomemcached.svg?branch=master
+    :target: https://coveralls.io/github/rexzhang/aiomemcached?branch=master
+.. image:: https://img.shields.io/pypi/v/aiomemcached.svg
+    :target: https://pypi.org/project/aiomemcached/
+.. image:: https://img.shields.io/pypi/pyversions/aiomemcached.svg
+    :target: https://pypi.org/project/aiomemcached/
+.. image:: https://img.shields.io/pypi/dm/aiomemcached.svg
+    :target: https://pypi.org/project/aiomemcached/
 
 Install
 -------
@@ -37,9 +44,9 @@ A simple example.
 
     asyncio.run(example())
 
+pytest
+------
 
+.. code-block:: shell
 
-Requirements
-------------
-
-- Python 3.7+
+    python -m pytest --cov=. --cov-report html

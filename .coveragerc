@@ -3,4 +3,4 @@ source = aiomemcached
 omit = setup.py,conftest.py,test_*,venv*
 
 [html]
-directory = coverage_html_report
+directory = htmlcov
