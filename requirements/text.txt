@@ -1,6 +1,5 @@
-#docker-py
+flake8
 pytest
 pytest-asyncio
 pytest-cov
-pytest-sugar
-flake8
+coveralls

@@ -1,26 +1,17 @@
-sudo: required
 language: python
 python:
   - "3.7"
   - "3.8"
 
 services:
-  - docker
   - memcached
 
 install:
   - pip install -U -r requirements/pypi.txt
   - pip install -U -r requirements/test.txt
-  - pip install -e .
-  - pip install codecov
 
 script:
-  - make cov
-  - python setup.py check -rm
-  - if python -c "import sys; sys.exit(sys.version_info < (3,7))"; then
-        python setup.py check -s;
-    fi
-
+  - python -m pytest --cov=.
 
 cache:
   directories:
@@ -30,16 +21,4 @@ before_cache:
   - rm -f $HOME/.cache/pip/log/debug.log
 
 after_script:
-  - codecov
-
-
-deploy:
-  provider: pypi
-  user: andrew.svetlov
-  password:
-    secure: eZr29byHDr1yo8KyYM+kRMxZ6jn8SFItiSy61SVuhn9/RfmlgHV5mn462kUTWnSPVOV0QMTJq5BpDpW8v4P1VyFCOno6+yvmrDJkObq7xTddLcYlgP8lIoY1wvp5Lq44lzagLMKAU37T1qXe344ufOCgLL3nRPmqspaUqHhAO9Q=
-  distributions: "sdist bdist_wheel"
-  on:
-    tags: true
-    all_branches: true
-    python: 3.7
+  - coveralls
