@@ -3,20 +3,17 @@ from collections import namedtuple
 
 __all__ = ['MemcachePool']
 
-
 _connection = namedtuple('connection', ['reader', 'writer'])
 
 
 class MemcachePool:
 
-    def __init__(self, host, port, *, minsize, maxsize, loop=None):
-        loop = loop if loop is not None else asyncio.get_event_loop()
+    def __init__(self, host, port, minsize, maxsize):
         self._host = host
         self._port = port
         self._minsize = minsize
         self._maxsize = maxsize
-        self._loop = loop
-        self._pool = asyncio.Queue(loop=loop)
+        self._pool = asyncio.Queue()
         self._in_use = set()
 
     async def clear(self):
@@ -67,7 +64,8 @@ class MemcachePool:
     async def _create_new_conn(self):
         if self.size() < self._maxsize:
             reader, writer = await asyncio.open_connection(
-                self._host, self._port, loop=self._loop)
+                self._host, self._port
+            )
             if self.size() < self._maxsize:
                 return _connection(reader, writer)
             else:
