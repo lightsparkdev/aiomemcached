@@ -1,7 +1,7 @@
 import random
 import asyncio
 import pytest
-from aiomemcached.pool import MemcachedPool #, _connection
+from aiomemcached.pool import MemcachedPool, MemcachedConnection
 from aiomemcached.client import acquire
 
 
@@ -21,19 +21,19 @@ async def test_pool_acquire_release(mcache_params):
     await pool.release(conn)
 
 
-# @pytest.mark.asyncio
-# async def test_pool_acquire_release2(mcache_params):
-#     pool = MemcachedPool(minsize=1, maxsize=5, **mcache_params)
-#     reader, writer = await asyncio.open_connection(
-#         mcache_params['host'], mcache_params['port'])
-#     # put dead connection to the pool
-#     writer.close()
-#     reader.feed_eof()
-#     conn = _connection(reader, writer)
-#     await pool._pool.put(conn)
-#     conn = await pool.acquire()
-#     assert isinstance(conn.reader, asyncio.StreamReader)
-#     assert isinstance(conn.writer, asyncio.StreamWriter)
+@pytest.mark.asyncio
+async def test_pool_acquire_release2(mcache_params):
+    pool = MemcachedPool(minsize=1, maxsize=5, **mcache_params)
+    reader, writer = await asyncio.open_connection(
+        mcache_params['host'], mcache_params['port'])
+    # put dead connection to the pool
+    writer.close()
+    reader.feed_eof()
+    conn = MemcachedConnection(reader, writer)
+    pool._pool.append(conn)
+    conn = await pool.acquire()
+    assert isinstance(conn.reader, asyncio.StreamReader)
+    assert isinstance(conn.writer, asyncio.StreamWriter)
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,6 @@ async def test_acquire_limit_maxsize(mcache_params):
 async def test_acquire_task_cancellation(
     mcache_params,
 ):
-
     class Client:
         def __init__(self, pool_size=4):
             self._pool = MemcachedPool(
