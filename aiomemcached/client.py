@@ -1,11 +1,19 @@
-import functools
 import re
+import functools
+import asyncio
+import warnings
+from io import BytesIO
+from typing import List, Dict, Union
 
-from . import constants
-from .pool import MemcachePool
+from .constants import *
+from .pool import MemcachedPool, MemcachedConnection
 from .exceptions import ClientException, ValidationException
 
 __all__ = ['Client']
+
+"""
+Ref: https://github.com/memcached/memcached/blob/master/doc/protocol.txt
+"""
 
 
 def acquire(func):
@@ -14,11 +22,14 @@ def acquire(func):
         conn = await self._pool.acquire()
         try:
             return await func(self, conn, *args, **kwargs)
+
         except Exception as exc:
-            conn[0].set_exception(exc)
-            raise
+            # conn[0].set_exception(exc)
+            raise Exception(exc)
+            # raise  # TODO
+
         finally:
-            self._pool.release(conn)
+            await self._pool.release(conn)
 
     return wrapper
 
@@ -26,14 +37,14 @@ def acquire(func):
 class Client(object):
 
     def __init__(
-        self, host=constants.DEFAULT_SERVER_HOST,
-        port=constants.DEFAULT_SERVER_port,
-        pool_size=2, pool_minsize=None
+        self, host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT,
+        pool_minsize: int = DEFAULT_POOL_MINSIZE,
+        pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
+        timeout: int = DEFAULT_TIMEOUT
     ):
-        if not pool_minsize:
-            pool_minsize = pool_size
-        self._pool = MemcachePool(
-            host, port, minsize=pool_minsize, maxsize=pool_size
+        self._timeout = timeout
+        self._pool = MemcachedPool(
+            host=host, port=port, minsize=pool_minsize, maxsize=pool_maxsize
         )
 
     # key supports ascii sans space and control chars
@@ -41,7 +52,7 @@ class Client(object):
     # also 1 <= len <= 250 as per the spec
     _valid_key_re = re.compile(b'^[\x21-\x7e]{1,250}$')
 
-    def _validate_key(self, key):
+    def _validate_key(self, key: bytes):
         if not isinstance(key, bytes):  # avoid bugs subtle and otherwise
             raise ValidationException('key must be bytes', key)
 
@@ -57,42 +68,280 @@ class Client(object):
 
         return key
 
-    async def _execute_simple_command(self, conn, raw_command):
-        response, line = bytearray(), b''
-
-        conn.writer.write(raw_command)
-        await conn.writer.drain()
-
-        while not line.endswith(b'\r\n'):
-            line = await conn.reader.readline()
-            response.extend(line)
-        return response[:-2]
-
     async def close(self):
         """Closes the sockets if its open."""
         await self._pool.clear()
 
-    async def _multi_get(self, conn, *keys, with_cas=True):
-        # req  - get <key> [<key> ...]\r\n
-        # resp - VALUE <key> <flags> <bytes> [<cas unique>]\r\n
-        #        <data block>\r\n (if exists)
-        #        [...]
-        #        END\r\n
-        if not keys:
-            return {}, {}
+    @acquire
+    async def _execute_raw_cmd(
+        self, conn: MemcachedConnection, cmd: bytes,
+        end_symbols: List[bytes] = None, one_line_response: bool = False
+    ) -> BytesIO:
+        if end_symbols is None:
+            end_symbols = list()
 
-        [self._validate_key(key) for key in keys]
-        if len(set(keys)) != len(keys):
-            raise ClientException('duplicate keys passed to multi_get')
+        conn.writer.write(cmd)
 
-        cmd = b'gets ' if with_cas else b'get '
-        conn.writer.write(cmd + b' '.join(keys) + b'\r\n')
+        response_stream = BytesIO()
+        while True:
+            try:
+                line = await asyncio.wait_for(
+                    conn.reader.readline(), timeout=self._timeout
+                )
+            except asyncio.TimeoutError as e:
+                raise Exception(e)
+                # break
+
+            response_stream.write(line)
+
+            if one_line_response:
+                break
+            if line[:len(end_symbols[0])] == end_symbols[0]:
+                break
+            if line.rstrip(b'\r\n') in end_symbols:
+                break
+
+        response_stream.seek(0)
+        return response_stream
+
+    async def _storage_command(
+        self, cmd: bytes, key: bytes, value: bytes,
+        flags: int = 0, exptime: int = 0, cas: int = None
+    ) -> bool:
+        """
+    Storage commands
+    ----------------
+
+    First, the client sends a command line which looks like this:
+
+    <command name> <key> <flags> <exptime> <bytes> [noreply]\r\n
+    cas <key> <flags> <exptime> <bytes> <cas unique> [noreply]\r\n
+
+    - <command name> is "set", "add", "replace", "append" or "prepend"
+
+      "set" means "store this data".
+
+      "add" means "store this data, but only if the server *doesn't* already
+      hold data for this key".
+
+      "replace" means "store this data, but only if the server *does*
+      already hold data for this key".
+
+      "append" means "add this data to an existing key after existing data".
+
+      "prepend" means "add this data to an existing key before existing data".
+
+      The append and prepend commands do not accept flags or exptime.
+      They update existing data portions, and ignore new flag and exptime
+      settings.
+
+      "cas" is a check and set operation which means "store this data but
+      only if no one else has updated since I last fetched it."
+
+    - <key> is the key under which the client asks to store the data
+
+    - <flags> is an arbitrary 16-bit unsigned integer (written out in
+      decimal) that the server stores along with the data and sends back
+      when the item is retrieved. Clients may use this as a bit field to
+      store data-specific information; this field is opaque to the server.
+      Note that in memcached 1.2.1 and higher, flags may be 32-bits, instead
+      of 16, but you might want to restrict yourself to 16 bits for
+      compatibility with older versions.
+
+    - <exptime> is expiration time. If it's 0, the item never expires
+      (although it may be deleted from the cache to make place for other
+      items). If it's non-zero (either Unix time or offset in seconds from
+      current time), it is guaranteed that clients will not be able to
+      retrieve this item after the expiration time arrives (measured by
+      server time). If a negative value is given the item is immediately
+      expired.
+
+    - <bytes> is the number of bytes in the data block to follow, *not*
+      including the delimiting \r\n. <bytes> may be zero (in which case
+      it's followed by an empty data block).
+
+    - <cas unique> is a unique 64-bit value of an existing entry.
+      Clients should use the value returned from the "gets" command
+      when issuing "cas" updates.
+
+    - "noreply" optional parameter instructs the server to not send the
+      reply.  NOTE: if the request line is malformed, the server can't
+      parse "noreply" option reliably.  In this case it may send the error
+      to the client, and not reading it on the client side will break
+      things.  Client should construct only valid requests.
+
+    After this line, the client sends the data block:
+
+    <data block>\r\n
+
+    - <data block> is a chunk of arbitrary 8-bit data of length <bytes>
+      from the previous line.
+
+    After sending the command line and the data block the client awaits
+    the reply, which may be:
+
+    - "STORED\r\n", to indicate success.
+
+    - "NOT_STORED\r\n" to indicate the data was not stored, but not
+    because of an error. This normally means that the
+    condition for an "add" or a "replace" command wasn't met.
+
+    - "EXISTS\r\n" to indicate that the item you are trying to store with
+    a "cas" command has been modified since you last fetched it.
+
+    - "NOT_FOUND\r\n" to indicate that the item you are trying to store
+    with a "cas" command did not exist.
+        """
+        # check keys
+        self._validate_key(key)
+        if flags < 0 or exptime < 0:
+            raise ValidationException(
+                'flags and exptime must be unsigned integer'.format(
+                    flags, exptime
+                )
+            )
+
+        if cas:
+            raw_cmd = b'cas %b %d %d %d %d\r\n%b\r\n' % (
+                key, flags, exptime, len(value), cas, value
+            )
+        else:
+            raw_cmd = b'%b %b %d %d %d\r\n%b\r\n' % (
+                cmd, key, flags, exptime, len(value), value
+            )
+
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, end_symbols=[STORED, NOT_STORED, EXISTS, NOT_FOUND]
+        )
+        if response_stream.readline().rstrip(b'\r\n') == STORED:
+            return True
+
+        else:
+            # TODO rasie with status , depend option raise_exp?
+            return False
+
+    async def set(
+        self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """"set" means "store this data"."""
+        return await self._storage_command(
+            cmd=b'set', key=key, value=value, flags=flags, exptime=exptime
+        )
+
+    async def add(
+        self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """
+        "add" means "store this data, but only if the server *doesn't* already
+        hold data for this key".
+        """
+        return await self._storage_command(
+            cmd=b'add', key=key, value=value, flags=flags, exptime=exptime
+        )
+
+    async def replace(
+        self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """
+        "replace" means "store this data, but only if the server *does*
+        already hold data for this key".
+        """
+        return await self._storage_command(
+            cmd=b'replace', key=key, value=value, flags=flags, exptime=exptime
+        )
+
+    async def append(
+        self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """
+        "append" means "add this data to an existing key after existing data".
+        """
+        return await self._storage_command(
+            cmd=b'append', key=key, value=value, flags=flags, exptime=exptime
+        )
+
+    async def prepend(
+        self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """"prepend" means
+        "add this data to an existing key before existing data".
+        """
+        return await self._storage_command(
+            cmd=b'prepend', key=key, value=value, flags=flags, exptime=exptime
+        )
+
+    async def cas(
+        self, key: bytes, value: bytes, cas: int,
+        flags: int = 0, exptime: int = 0
+    ) -> bool:
+        """
+        "cas" is a check and set operation which means "store this data but
+        only if no one else has updated since I last fetched it."
+        """
+        return await self._storage_command(
+            cmd=b'cas', key=key, value=value,
+            flags=flags, exptime=exptime, cas=cas
+        )
+
+    async def _retrieval_command(
+        self, keys: List[bytes], with_cas: bool = False
+    ) -> (Dict[bytes, bytes], Dict[bytes, bytes]):
+        """
+        Retrieval command:
+        ------------------
+
+        The retrieval commands "get" and "gets" operate like this:
+
+        get <key>*\r\n
+        gets <key>*\r\n
+
+        - <key>* means one or more key strings separated by whitespace.
+
+        After this command, the client expects zero or more items, each of
+        which is received as a text line followed by a data block. After all
+        the items have been transmitted, the server sends the string
+
+        "END\r\n"
+
+        to indicate the end of response.
+
+        Each item sent by the server looks like this:
+
+        VALUE <key> <flags> <bytes> [<cas unique>]\r\n
+        <data block>\r\n
+
+        - <key> is the key for the item being sent
+
+        - <flags> is the flags value set by the storage command
+
+        - <bytes> is the length of the data block to follow, *not* including
+          its delimiting \r\n
+
+        - <cas unique> is a unique 64-bit integer that uniquely identifies
+          this specific item.
+
+        - <data block> is the data for this item.
+
+        If some of the keys appearing in a retrieval request are not sent back
+        by the server in the item list this means that the server does not
+        hold items with such keys (because they were never stored, or stored
+        but deleted to make space for more items, or expired, or explicitly
+        deleted by a client).
+        """
+        end_symbol = b'END\r\n'
+
+        cmd_format = b'gets %b\r\n' if with_cas else b'get %b\r\n'
+        cmd = cmd_format % b' '.join(keys)
+
+        response_stream = await self._execute_raw_cmd(
+            cmd=cmd, end_symbols=[end_symbol, ]
+        )
 
         received = {}
         cas_tokens = {}
-        line = await conn.reader.readline()
 
-        while line != b'END\r\n':
+        line = response_stream.readline()
+        while line != b'' and line != end_symbol:
             terms = line.split()
 
             if terms[0] == b'VALUE':  # exists
@@ -103,89 +352,294 @@ class Client(object):
                 if flags != 0:
                     raise ClientException('received non zero flags')
 
-                val = (await conn.reader.readexactly(length + 2))[:-2]
+                val = response_stream.read(length + 2)[:-2]
                 if key in received:
                     raise ClientException('duplicate results from server')
 
                 received[key] = val
                 cas_tokens[key] = int(terms[4]) if with_cas else None
-            else:
-                raise ClientException('get failed', line)
 
-            line = await conn.reader.readline()
+            else:
+                raise ClientException('get failed {} {}'.format(
+                    line, received
+                ))
+
+            line = response_stream.readline()
 
         if len(received) > len(keys):
             raise ClientException('received too many responses')
+
         return received, cas_tokens
 
-    @acquire
-    async def delete(self, conn, key):
-        """Deletes a key/value pair from the server.
-
-        :param key: is the key to delete.
-        :return: True if case values was deleted or False to indicate
-        that the item with this key was not found.
-        """
-        assert self._validate_key(key)
-
-        command = b'delete ' + key + b'\r\n'
-        response = await self._execute_simple_command(conn, command)
-
-        if response not in (constants.DELETED, constants.NOT_FOUND):
-            raise ClientException('Memcached delete failed', response)
-        return response == constants.DELETED
-
-    @acquire
-    async def get(self, conn, key, default=None):
+    async def get(self, key: bytes, default: bytes = None) -> bytes:
         """Gets a single value from the server.
-
-        :param key: ``bytes``, is the key for the item being fetched
-        :param default: default value if there is no value.
-        :return: ``bytes``, is the data for this specified key.
         """
-        values, _ = await self._multi_get(conn, key)
-        return values.get(key, default)
+        # check key
+        self._validate_key(key)
 
-    @acquire
-    async def gets(self, conn, key, default=None):
+        keys = [key, ]
+        received, cas_tokens = await self._retrieval_command(keys)
+
+        return received.get(key, default)
+
+    async def gets(self, key: bytes, default: bytes = None) -> (bytes, bytes):
         """Gets a single value from the server together with the cas token.
-
-        :param key: ``bytes``, is the key for the item being fetched
-        :param default: default value if there is no value.
-        :return: ``bytes``, ``bytes tuple with the value and the cas
         """
-        values, cas_tokens = await self._multi_get(
-            conn, key, with_cas=True)
+        # check key
+        self._validate_key(key)
+
+        keys = [key, ]
+        values, cas_tokens = await self._retrieval_command(keys, with_cas=True)
         return values.get(key, default), cas_tokens.get(key)
 
-    @acquire
-    async def multi_get(self, conn, *keys):
+    async def get_many(self, keys: List[bytes]) -> Dict[bytes, bytes]:
         """Takes a list of keys and returns a list of values.
-
-        :param keys: ``list`` keys for the item being fetched.
-        :return: ``list`` of values for the specified keys.
-        :raises:``ValidationException``, ``ClientException``,
-        and socket errors
         """
-        values, _ = await self._multi_get(conn, *keys)
+        values, _ = await self.gets_many(keys)
+        return values
+
+    async def gets_many(
+        self, keys: List[bytes]
+    ) -> (Dict[bytes, bytes], Dict[bytes, bytes]):
+        """Takes a list of keys and returns a list of values
+        together with the cas token.
+        """
+        # check keys
+        [self._validate_key(key) for key in keys]
+        if len(keys) == 0:
+            return dict(), dict()
+        if len(set(keys)) != len(keys):
+            raise ClientException('duplicate keys passed to multi_get')
+
+        values, cas_tokens = await self._retrieval_command(keys)
+        return values, cas_tokens
+
+    async def multi_get(self, *args):
+        """shadow for get_multi, DeprecationWarning"""
+        warnings.warn(
+            'multi_get is deprecated since AioMemcached 0.8, '
+            'and scheduled for removal in AioMemcached 0.9 .)',
+            DeprecationWarning
+        )
+        keys = [arg for arg in args]
+        values = await self.get_many(keys)
         return tuple(values.get(key) for key in keys)
 
-    @acquire
-    async def stats(self, conn, args=None):
-        """Runs a stats command on the server."""
-        # req  - stats [additional args]\r\n
-        # resp - STAT <name> <value>\r\n (one per result)
-        #        END\r\n
+    async def delete(self, key: bytes) -> bool:
+        """
+        Deletion
+        --------
+
+        The command "delete" allows for explicit deletion of items:
+
+        delete <key> [noreply]\r\n
+
+        - <key> is the key of the item the client wishes the server to delete
+
+        - "noreply" optional parameter instructs the server to not send the
+          reply.  See the note in Storage commands regarding malformed
+          requests.
+
+        The response line to this command can be one of:
+
+        - "DELETED\r\n" to indicate success
+
+        - "NOT_FOUND\r\n" to indicate that the item with this key was not
+          found.
+
+        See the "flush_all" command below for immediate invalidation
+        of all existing items.
+        """
+        # check key
+        self._validate_key(key)
+
+        raw_cmd = b'delete %b\r\n' % key
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, end_symbols=[STORED, DELETED, NOT_FOUND]
+        )
+        if response_stream.readline().rstrip(b'\r\n') == DELETED:
+            return True
+
+        else:
+            # TODO rasie with status , depend option raise_exp?
+            return False
+
+    async def _incr_decr(
+        self, cmd: bytes, key: bytes, value: int
+    ) -> Union[int, None]:
+        """
+        Increment/Decrement
+        -------------------
+
+        Commands "incr" and "decr" are used to change data for some item
+        in-place, incrementing or decrementing it. The data for the item is
+        treated as decimal representation of a 64-bit unsigned integer.  If
+        the current data value does not conform to such a representation, the
+        incr/decr commands return an error (memcached <= 1.2.6 treated the
+        bogus value as if it were 0, leading to confusion). Also, the item
+        must already exist for incr/decr to work; these commands won't pretend
+        that a non-existent key exists with value 0; instead, they will fail.
+
+        The client sends the command line:
+
+        incr <key> <value> [noreply]\r\n
+
+        or
+
+        decr <key> <value> [noreply]\r\n
+
+        - <key> is the key of the item the client wishes to change
+
+        - <value> is the amount by which the client wants to increase/decrease
+        the item. It is a decimal representation of a 64-bit unsigned integer.
+
+        - "noreply" optional parameter instructs the server to not send the
+          reply.  See the note in Storage commands regarding malformed
+          requests.
+
+        The response will be one of:
+
+        - "NOT_FOUND\r\n" to indicate the item with this value was not found
+
+        - <value>\r\n , where <value> is the new value of the item's data,
+          after the increment/decrement operation was carried out.
+
+        Note that underflow in the "decr" command is caught: if a client tries
+        to decrease the value below 0, the new value will be 0.  Overflow in
+        the "incr" command will wrap around the 64 bit mark.
+
+        Note also that decrementing a number such that it loses length isn't
+        guaranteed to decrement its returned length.  The number MAY be
+        space-padded at the end, but this is purely an implementation
+        optimization, so you also shouldn't rely on that.
+        """
+        # check key
+        self._validate_key(key)
+        if value < 0:
+            raise ValidationException(
+                'value is must be unsigned integer', value
+            )
+
+        raw_cmd = b'%b %b %d\r\n' % (cmd, key, value)
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, one_line_response=True
+        )
+        response = response_stream.readline().rstrip(b'\r\n')
+
+        try:
+            if response == NOT_FOUND:
+                # return None
+                raise ValueError
+            new_value = int(response)
+
+        except ValueError:
+            # TODO raise with status , depend option raise_exp?
+            raise ClientException(
+                'Memcached {} command failed'.format(str(raw_cmd)), response)
+            # return None
+
+        return new_value
+
+    async def incr(
+        self, key: bytes, value: int = 1, increment: int = None
+    ) -> Union[int, None]:
+        if increment:
+            warnings.warn(
+                'incr() param increment is deprecated since AioMemcached 0.8, '
+                'and scheduled for removal in AioMemcached 0.9 .)',
+                DeprecationWarning
+            )
+            value = increment
+        return await self._incr_decr(cmd=b'incr', key=key, value=value)
+
+    async def decr(
+        self, key: bytes, value: int = 1, decrement: int = None
+    ) -> Union[int, None]:
+        if decrement:
+            warnings.warn(
+                'incr() param increment is deprecated since AioMemcached 0.8, '
+                'and scheduled for removal in AioMemcached 0.9 .)',
+                DeprecationWarning
+            )
+            value = decrement
+        return await self._incr_decr(cmd=b'decr', key=key, value=value)
+
+    async def touch(self, key: bytes, exptime: int) -> bool:
+        """
+Touch
+-----
+
+The "touch" command is used to update the expiration time of an existing item
+without fetching it.
+
+touch <key> <exptime> [noreply]\r\n
+
+- <key> is the key of the item the client wishes the server to touch
+
+- <exptime> is expiration time. Works the same as with the update commands
+  (set/add/etc). This replaces the existing expiration time. If an existing
+  item were to expire in 10 seconds, but then was touched with an
+  expiration time of "20", the item would then expire in 20 seconds.
+
+- "noreply" optional parameter instructs the server to not send the
+  reply.  See the note in Storage commands regarding malformed
+  requests.
+
+The response line to this command can be one of:
+
+- "TOUCHED\r\n" to indicate success
+
+- "NOT_FOUND\r\n" to indicate that the item with this key was not
+  found.
+        """
+        # check key
+        self._validate_key(key)
+
+        raw_cmd = b'touch %b %d\r\n' % (key, exptime)
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, end_symbols=[TOUCHED, NOT_FOUND]
+        )
+        if response_stream.readline().rstrip(b'\r\n') == TOUCHED:
+            return True
+
+        else:
+            # TODO rasie with status , depend option raise_exp?
+            return False
+        pass
+
+    async def stats(self, args: bytes = None) -> dict:
+        """
+        Statistics
+        ----------
+
+        The command "stats" is used to query the server about statistics it
+        maintains and other internal data. It has two forms. Without
+        arguments:
+
+        stats\r\n
+
+        it causes the server to output general-purpose statistics and
+        settings, documented below.  In the other form it has some arguments:
+
+        stats <args>\r\n
+
+        Depending on <args>, various internal data is sent by the server. The
+        kinds of arguments and the data sent are not documented in this version
+        of the protocol, and are subject to change for the convenience of
+        memcache developers.
+        """
         if args is None:
             args = b''
 
-        conn.writer.write(b''.join((b'stats ', args, b'\r\n')))
+        raw_cmd = b'stats %b\r\n' % args
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, end_symbols=[b'END\r\n', ]
+        )
 
         result = {}
-
-        resp = await conn.reader.readline()
-        while resp != b'END\r\n':
-            terms = resp.split()
+        line = response_stream.readline()
+        while line != b'END\r\n':
+            terms = line.split()
 
             if len(terms) == 2 and terms[0] == b'STAT':
                 result[terms[1]] = None
@@ -194,227 +648,38 @@ class Client(object):
             elif len(terms) >= 3 and terms[0] == b'STAT':
                 result[terms[1]] = b' '.join(terms[2:])
             else:
-                raise ClientException('stats failed', resp)
+                raise ClientException('stats failed', line)
 
-            resp = await conn.reader.readline()
+            line = response_stream.readline()
 
         return result
 
-    async def _storage_command(self, conn, command, key, value,
-                               flags=0, exptime=0, cas=None):
-        # req  - set <key> <flags> <exptime> <bytes> [noreply]\r\n
-        #        <data block>\r\n
-        # resp - STORED\r\n (or others)
-        # req  - set <key> <flags> <exptime> <bytes> <cas> [noreply]\r\n
-        #        <data block>\r\n
-        # resp - STORED\r\n (or others)
-
-        # typically, if val is > 1024**2 bytes server returns:
-        #   SERVER_ERROR object too large for cache\r\n
-        # however custom-compiled memcached can have different limit
-        # so, we'll let the server decide what's too much
-        assert self._validate_key(key)
-
-        if not isinstance(exptime, int):
-            raise ValidationException('exptime not int', exptime)
-        elif exptime < 0:
-            raise ValidationException('exptime negative', exptime)
-
-        args = [str(a).encode('utf-8') for a in (flags, exptime, len(value))]
-        _cmd = b' '.join([command, key] + args)
-        if cas:
-            _cmd += b' ' + str(cas).encode('utf-8')
-        cmd = _cmd + b'\r\n' + value + b'\r\n'
-        resp = await self._execute_simple_command(conn, cmd)
-
-        if resp not in (
-            constants.STORED, constants.NOT_STORED, constants.EXISTS,
-            constants.NOT_FOUND
-        ):
-            raise ClientException('stats {} failed'.format(command), resp)
-        return resp == constants.STORED
-
-    @acquire
-    async def set(self, conn, key, value, exptime=0):
-        """Sets a key to a value on the server
-        with an optional exptime (0 means don't auto-expire)
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``, data to store.
-        :param exptime: ``int``, is expiration time. If it's 0, the
-        item never expires.
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        resp = await self._storage_command(
-            conn, b'set', key, value, flags, exptime)
-        return resp
-
-    @acquire
-    async def cas(self, conn, key, value, cas_token, exptime=0):
-        """Sets a key to a value on the server
-        with an optional exptime (0 means don't auto-expire)
-        only if value hasn't change from first retrieval
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``, data to store.
-        :param exptime: ``int``, is expiration time. If it's 0, the
-        item never expires.
-        :param cas_token: ``int``, unique cas token retrieve from previous
-            ``gets``
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        resp = await self._storage_command(
-            conn, b'cas', key, value, flags, exptime, cas=cas_token)
-        return resp
-
-    @acquire
-    async def add(self, conn, key, value, exptime=0):
-        """Store this data, but only if the server *doesn't* already
-        hold data for this key.
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``,  data to store.
-        :param exptime: ``int`` is expiration time. If it's 0, the
-        item never expires.
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        return (await self._storage_command(
-            conn, b'add', key, value, flags, exptime))
-
-    @acquire
-    async def replace(self, conn, key, value, exptime=0):
-        """Store this data, but only if the server *does*
-        already hold data for this key.
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``,  data to store.
-        :param exptime: ``int`` is expiration time. If it's 0, the
-        item never expires.
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        return (await self._storage_command(
-            conn, b'replace', key, value, flags, exptime))
-
-    @acquire
-    async def append(self, conn, key, value, exptime=0):
-        """Add data to an existing key after existing data
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``,  data to store.
-        :param exptime: ``int`` is expiration time. If it's 0, the
-        item never expires.
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        return (await self._storage_command(
-            conn, b'append', key, value, flags, exptime))
-
-    @acquire
-    async def prepend(self, conn, key, value, exptime=0):
-        """Add data to an existing key before existing data
-
-        :param key: ``bytes``, is the key of the item.
-        :param value: ``bytes``, data to store.
-        :param exptime: ``int`` is expiration time. If it's 0, the
-        item never expires.
-        :return: ``bool``, True in case of success.
-        """
-        flags = 0  # TODO: fix when exception removed
-        return (await self._storage_command(
-            conn, b'prepend', key, value, flags, exptime))
-
-    async def _incr_decr(self, conn, command, key, delta):
-        delta_byte = str(delta).encode('utf-8')
-        cmd = b' '.join([command, key, delta_byte]) + b'\r\n'
-        resp = await self._execute_simple_command(conn, cmd)
-        if not resp.isdigit() or resp == constants.NOT_FOUND:
-            raise ClientException(
-                'Memcached {} command failed'.format(str(command)), resp)
-        return int(resp) if resp.isdigit() else None
-
-    @acquire
-    async def incr(self, conn, key, increment=1):
-        """Command is used to change data for some item in-place,
-        incrementing it. The data for the item is treated as decimal
-        representation of a 64-bit unsigned integer.
-
-        :param key: ``bytes``, is the key of the item the client wishes
-        to change
-        :param increment: ``int``, is the amount by which the client
-        wants to increase the item.
-        :return: ``int``, new value of the item's data,
-        after the increment or ``None`` to indicate the item with
-        this value was not found
-        """
-        assert self._validate_key(key)
-        resp = await self._incr_decr(
-            conn, b'incr', key, increment)
-        return resp
-
-    @acquire
-    async def decr(self, conn, key, decrement=1):
-        """Command is used to change data for some item in-place,
-        decrementing it. The data for the item is treated as decimal
-        representation of a 64-bit unsigned integer.
-
-        :param key: ``bytes``, is the key of the item the client wishes
-        to change
-        :param decrement: ``int``, is the amount by which the client
-        wants to decrease the item.
-        :return: ``int`` new value of the item's data,
-        after the increment or ``None`` to indicate the item with
-        this value was not found
-        """
-        assert self._validate_key(key)
-        resp = await self._incr_decr(
-            conn, b'decr', key, decrement)
-        return resp
-
-    @acquire
-    async def touch(self, conn, key, exptime):
-        """The command is used to update the expiration time of
-        an existing item without fetching it.
-
-        :param key: ``bytes``, is the key to update expiration time
-        :param exptime: ``int``, is expiration time. This replaces the existing
-        expiration time.
-        :return: ``bool``, True in case of success.
-        """
-        assert self._validate_key(key)
-
-        _cmd = b' '.join([b'touch', key, str(exptime).encode('utf-8')])
-        cmd = _cmd + b'\r\n'
-        resp = await self._execute_simple_command(conn, cmd)
-        if resp not in (constants.TOUCHED, constants.NOT_FOUND):
-            raise ClientException('Memcached touch failed', resp)
-        return resp == constants.TOUCHED
-
-    @acquire
-    async def version(self, conn):
+    async def version(self) -> bytes:
         """Current version of the server.
 
         :return: ``bytes``, memcached version for current the server.
         """
-
-        command = b'version\r\n'
-        response = await self._execute_simple_command(
-            conn, command
+        cmd = b'version\r\n'
+        response_stream = await self._execute_raw_cmd(
+            cmd=cmd, end_symbols=[VERSION, ]
         )
-        if not response.startswith(constants.VERSION):
+
+        response = response_stream.readline()
+        if not response.startswith(VERSION):
             raise ClientException('Memcached version failed', response)
-        versions = response.split(maxsplit=1)
+
+        versions = response.rstrip(b'\r\n').split(maxsplit=1)
         return versions[1]
 
-    @acquire
-    async def flush_all(self, conn):
+    async def flush_all(self) -> None:
         """Its effect is to invalidate all existing items immediately"""
-        command = b'flush_all\r\n'
-        response = await self._execute_simple_command(
-            conn, command)
+        cmd = b'flush_all\r\n'
+        response_stream = await self._execute_raw_cmd(
+            cmd=cmd, end_symbols=[OK, ]
+        )
 
-        if constants.OK != response:
-            raise ClientException('Memcached flush_all failed', response)
+        response = response_stream.readline()
+        if not response.startswith(OK):
+            raise ClientException(
+                'Memcached flush_all failed', response_stream.getvalue()
+            )

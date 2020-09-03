@@ -1,79 +1,94 @@
 import asyncio
-from collections import namedtuple
+from asyncio.streams import StreamReader, StreamWriter
+from collections import deque
 
-__all__ = ['MemcachePool']
+from .constants import DEFAULT_POOL_MAXSIZE, DEFAULT_POOL_MINSIZE
 
-_connection = namedtuple('connection', ['reader', 'writer'])
+__all__ = ['MemcachedPool', 'MemcachedConnection']
 
 
-class MemcachePool:
+class MemcachedConnection:
+    def __init__(self, reader: StreamReader, writer: StreamWriter):
+        self.in_use = False
+        self.reader = reader
+        self.writer = writer
 
-    def __init__(self, host, port, minsize, maxsize):
+    async def close(self):
+        self.reader.feed_eof()
+        self.writer.close()
+
+
+class MemcachedPool:
+    def __init__(
+        self, host: str, port: int,
+        minsize: int = DEFAULT_POOL_MINSIZE,
+        maxsize: int = DEFAULT_POOL_MAXSIZE
+    ):
         self._host = host
         self._port = port
-        self._minsize = minsize
-        self._maxsize = maxsize
-        self._pool = asyncio.Queue()
-        self._in_use = set()
 
-    async def clear(self):
-        """Clear pool connections."""
-        while not self._pool.empty():
-            conn = await self._pool.get()
-            self._do_close(conn)
+        self._pool = deque()
+        self._pool_minsize = minsize
+        self._pool_maxsize = maxsize
+        self._pool_lock = asyncio.Lock()
 
-    def _do_close(self, conn):
-        conn.reader.feed_eof()
-        conn.writer.close()
+    def size(self) -> int:
+        return len(self._pool)
 
-    async def acquire(self):
-        """Acquire connection from the pool, or spawn new one
-        if pool maxsize permits.
+    async def _create_new_connection(self) -> MemcachedConnection:
+        while self.size() >= self._pool_maxsize:
+            await asyncio.sleep(1)
 
-        :return: ``tuple`` (reader, writer)
+        reader, writer = await asyncio.open_connection(
+            self._host, self._port
+        )
+
+        return MemcachedConnection(reader, writer)
+
+    async def acquire(self) -> MemcachedConnection:
+        """Acquires a not in used connection from pool.
+        Creates new connection if needed.
         """
-        while self.size() == 0 or self.size() < self._minsize:
-            _conn = await self._create_new_conn()
-            if _conn is None:
-                break
-            self._pool.put_nowait(_conn)
+        try:
+            conn = self._pool[0]
+            if conn.is_use:
+                raise IndexError
 
-        conn = None
-        while not conn:
-            _conn = await self._pool.get()
-            if _conn.reader.at_eof() or _conn.reader.exception():
-                self._do_close(_conn)
-                conn = await self._create_new_conn()
-            else:
-                conn = _conn
+            conn.is_use = True
+            self._pool.rotate(-1)
+            return conn
 
-        self._in_use.add(conn)
+        except IndexError:
+            pass
+
+        conn = await self._create_new_connection()
+        conn.in_use = True
+        self._pool.append(conn)
         return conn
 
-    def release(self, conn):
-        """Releases connection back to the pool.
-
-        :param conn: ``namedtuple`` (reader, writer)
+    async def release(self, conn: MemcachedConnection) -> None:
+        """Returns used connection back into pool.
+        When pool size > minsize the connection will be dropped.
         """
-        self._in_use.remove(conn)
-        if conn.reader.at_eof() or conn.reader.exception():
-            self._do_close(conn)
-        else:
-            self._pool.put_nowait(conn)
+        await self._pool_lock.acquire()
+        try:
+            if conn not in self._pool:
+                return
 
-    async def _create_new_conn(self):
-        if self.size() < self._maxsize:
-            reader, writer = await asyncio.open_connection(
-                self._host, self._port
-            )
-            if self.size() < self._maxsize:
-                return _connection(reader, writer)
+            if self.size() > self._pool_minsize:
+                await conn.close()
+                self._pool.remove(conn)
+
             else:
-                reader.feed_eof()
-                writer.close()
-                return None
-        else:
-            return None
+                conn.is_use = False
 
-    def size(self):
-        return self._pool.qsize() + len(self._in_use)
+        finally:
+            self._pool_lock.release()
+
+    async def clear(self) -> None:
+        """Clear pool connections.
+        Close and remove all free connections.
+        """
+        while self._pool:
+            conn = self._pool.pop()
+            await conn.close()
