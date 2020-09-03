@@ -9,11 +9,33 @@ from .constants import *
 from .pool import MemcachedPool, MemcachedConnection
 from .exceptions import ClientException, ValidationException
 
-__all__ = ['Client']
-
 """
 Ref: https://github.com/memcached/memcached/blob/master/doc/protocol.txt
 """
+
+__all__ = ['Client']
+
+# key supports ascii sans space and control chars
+# \x21 is !, right after space, and \x7e is -, right before DEL
+# also 1 <= len <= 250 as per the spec
+_VALIDATE_KEY_RE = re.compile(b'^[\x21-\x7e]{1,250}$')
+
+
+def _validate_key(key: bytes):
+    if not isinstance(key, bytes):  # avoid bugs subtle and otherwise
+        raise ValidationException('key must be bytes', key)
+
+    m = _VALIDATE_KEY_RE.match(key)
+    if m:
+        # in python re, $ matches either end of line or right before
+        # \n at end of line. We can't allow latter case, so
+        # making sure length matches is simplest way to detect
+        if len(m.group(0)) != len(key):
+            raise ValidationException('trailing newline', key)
+    else:
+        raise ValidationException('invalid key', key)
+
+    return key
 
 
 def acquire(func):
@@ -46,27 +68,6 @@ class Client(object):
         self._pool = MemcachedPool(
             host=host, port=port, minsize=pool_minsize, maxsize=pool_maxsize
         )
-
-    # key supports ascii sans space and control chars
-    # \x21 is !, right after space, and \x7e is -, right before DEL
-    # also 1 <= len <= 250 as per the spec
-    _valid_key_re = re.compile(b'^[\x21-\x7e]{1,250}$')
-
-    def _validate_key(self, key: bytes):
-        if not isinstance(key, bytes):  # avoid bugs subtle and otherwise
-            raise ValidationException('key must be bytes', key)
-
-        m = self._valid_key_re.match(key)
-        if m:
-            # in python re, $ matches either end of line or right before
-            # \n at end of line. We can't allow latter case, so
-            # making sure length matches is simplest way to detect
-            if len(m.group(0)) != len(key):
-                raise ValidationException('trailing newline', key)
-        else:
-            raise ValidationException('invalid key', key)
-
-        return key
 
     async def close(self):
         """Closes the sockets if its open."""
@@ -192,8 +193,9 @@ class Client(object):
     - "NOT_FOUND\r\n" to indicate that the item you are trying to store
     with a "cas" command did not exist.
         """
-        # check keys
-        self._validate_key(key)
+        # validate key
+        _validate_key(key)
+
         if flags < 0 or exptime < 0:
             raise ValidationException(
                 'flags and exptime must be unsigned integer'.format(
@@ -328,6 +330,9 @@ class Client(object):
         but deleted to make space for more items, or expired, or explicitly
         deleted by a client).
         """
+        # validate keys
+        [_validate_key(key) for key in keys]
+
         end_symbol = b'END\r\n'
 
         cmd_format = b'gets %b\r\n' if with_cas else b'get %b\r\n'
@@ -374,9 +379,6 @@ class Client(object):
     async def get(self, key: bytes, default: bytes = None) -> bytes:
         """Gets a single value from the server.
         """
-        # check key
-        self._validate_key(key)
-
         keys = [key, ]
         received, cas_tokens = await self._retrieval_command(keys)
 
@@ -385,9 +387,6 @@ class Client(object):
     async def gets(self, key: bytes, default: bytes = None) -> (bytes, bytes):
         """Gets a single value from the server together with the cas token.
         """
-        # check key
-        self._validate_key(key)
-
         keys = [key, ]
         values, cas_tokens = await self._retrieval_command(keys, with_cas=True)
         return values.get(key, default), cas_tokens.get(key)
@@ -405,11 +404,10 @@ class Client(object):
         together with the cas token.
         """
         # check keys
-        [self._validate_key(key) for key in keys]
         if len(keys) == 0:
             return dict(), dict()
-        if len(set(keys)) != len(keys):
-            raise ClientException('duplicate keys passed to multi_get')
+
+        keys = list(set(keys))  # ignore duplicate keys error
 
         values, cas_tokens = await self._retrieval_command(keys)
         return values, cas_tokens
@@ -450,8 +448,8 @@ class Client(object):
         See the "flush_all" command below for immediate invalidation
         of all existing items.
         """
-        # check key
-        self._validate_key(key)
+        # validate key
+        _validate_key(key)
 
         raw_cmd = b'delete %b\r\n' % key
         response_stream = await self._execute_raw_cmd(
@@ -513,8 +511,9 @@ class Client(object):
         space-padded at the end, but this is purely an implementation
         optimization, so you also shouldn't rely on that.
         """
-        # check key
-        self._validate_key(key)
+        # validate key
+        _validate_key(key)
+
         if value < 0:
             raise ValidationException(
                 'value is must be unsigned integer', value
@@ -592,8 +591,8 @@ The response line to this command can be one of:
 - "NOT_FOUND\r\n" to indicate that the item with this key was not
   found.
         """
-        # check key
-        self._validate_key(key)
+        # validate key
+        _validate_key(key)
 
         raw_cmd = b'touch %b %d\r\n' % (key, exptime)
         response_stream = await self._execute_raw_cmd(
@@ -603,7 +602,7 @@ The response line to this command can be one of:
             return True
 
         else:
-            # TODO rasie with status , depend option raise_exp?
+            # TODO raise with status , depend option raise_exp?
             return False
         pass
 

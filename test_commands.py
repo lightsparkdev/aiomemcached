@@ -86,15 +86,6 @@ async def test_multi_get(mcache):
 
 
 @pytest.mark.asyncio
-async def test_multi_get_doubling_keys(mcache):
-    key, value = b'key:multi_get:3', b'1'
-    await mcache.set(key, value)
-
-    with pytest.raises(ClientException):
-        await mcache.multi_get(key, key)
-
-
-@pytest.mark.asyncio
 async def test_set_expire(mcache):
     key, value = b'key:set', b'1'
     await mcache.set(key, value, exptime=1)
