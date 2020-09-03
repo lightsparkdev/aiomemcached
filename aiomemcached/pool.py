@@ -51,10 +51,10 @@ class MemcachedPool:
         """
         try:
             conn = self._pool[0]
-            if conn.is_use:
+            if conn.in_use:
                 raise IndexError
 
-            conn.is_use = True
+            conn.in_use = True
             self._pool.rotate(-1)
             return conn
 
@@ -80,7 +80,7 @@ class MemcachedPool:
                 self._pool.remove(conn)
 
             else:
-                conn.is_use = False
+                conn.in_use = False
 
         finally:
             self._pool_lock.release()
