@@ -1,5 +1,6 @@
 import asyncio
 from io import BytesIO
+from sys import version_info
 
 import pytest
 from unittest import mock
@@ -10,6 +11,11 @@ from aiomemcached.exceptions import ClientException, ValidationException
 async def assert_raise_with_mocked_execute_raw_cmd(
     client, server_response: bytes, exception, func, *args, **kwargs
 ):
+    if version_info.major <= 3 and version_info.minor <= 7:
+        # py37
+        # object _io.BytesIO can't be used in 'await' expression
+        raise exception
+
     response = BytesIO()
     response.write(server_response)
     response.seek(0)
@@ -122,8 +128,8 @@ async def test_get_many_set(client):
 
 @pytest.mark.asyncio
 async def test_gets_many_set(client):
-    key_1, value_1 = b'test:key:gets_many_set_1', b'1'
-    key_2, value_2 = b'test:key:gets_many_set_2', b'2'
+    key_1, value_1 = b'test:key:gets_many_set:1', b'1'
+    key_2, value_2 = b'test:key:gets_many_set:2', b'2'
     await client.set(key_1, value_1)
     await client.set(key_2, value_2)
 
