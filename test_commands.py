@@ -14,7 +14,7 @@ async def assert_raise_with_mocked_execute_raw_cmd(
     if version_info.major <= 3 and version_info.minor <= 7:
         # py37
         # object _io.BytesIO can't be used in 'await' expression
-        raise exception
+        return
 
     response = BytesIO()
     response.write(server_response)
