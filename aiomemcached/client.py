@@ -380,7 +380,7 @@ class Client(object):
         """Gets a single value from the server.
         """
         keys = [key, ]
-        received, cas_tokens = await self._retrieval_command(keys)
+        received, _ = await self._retrieval_command(keys)
 
         return received.get(key, default)
 
@@ -388,8 +388,8 @@ class Client(object):
         """Gets a single value from the server together with the cas token.
         """
         keys = [key, ]
-        values, cas_tokens = await self._retrieval_command(keys, with_cas=True)
-        return values.get(key, default), cas_tokens.get(key)
+        values, cases = await self._retrieval_command(keys, with_cas=True)
+        return values.get(key, default), cases.get(key)
 
     async def get_many(self, keys: List[bytes]) -> Dict[bytes, bytes]:
         """Takes a list of keys and returns a list of values.
@@ -409,8 +409,8 @@ class Client(object):
 
         keys = list(set(keys))  # ignore duplicate keys error
 
-        values, cas_tokens = await self._retrieval_command(keys)
-        return values, cas_tokens
+        values, cases = await self._retrieval_command(keys)
+        return values, cases
 
     async def multi_get(self, *args):
         """shadow for get_multi, DeprecationWarning"""
@@ -604,7 +604,6 @@ The response line to this command can be one of:
         else:
             # TODO raise with status , depend option raise_exp?
             return False
-        pass
 
     async def stats(self, args: bytes = None) -> dict:
         """

@@ -1,12 +1,5 @@
-# import contextlib
 import pytest
-# import socket
-# import sys
-# import time
-# import uuid
-# import docker as docker_mod
 
-# import memcache
 import aiomemcached
 
 DEFAULT_CLIENT_PARAMS = dict(
@@ -124,7 +117,7 @@ def mcache_params():
 
 
 @pytest.fixture
-async def mcache():
+async def client():
     client = aiomemcached.Client(**DEFAULT_CLIENT_PARAMS)
     yield client
     await client.close()
