@@ -18,10 +18,13 @@ __all__ = ['Client']
 # key supports ascii sans space and control chars
 # \x21 is !, right after space, and \x7e is -, right before DEL
 # also 1 <= len <= 250 as per the spec
-_VALIDATE_KEY_RE = re.compile(b'^[\x21-\x7e]{1,250}$')
+_VALIDATE_KEY_RE = re.compile(b'^[^\x00-\x20\x7f]{1,250}$')
 
 
-def _validate_key(key: bytes):
+def validate_key(key: bytes):
+    """A key (arbitrary string up to 250 bytes in length.
+    No space or newlines for ASCII mode)
+    """
     if not isinstance(key, bytes):  # avoid bugs subtle and otherwise
         raise ValidationException('key must be bytes', key)
 
@@ -194,7 +197,7 @@ class Client(object):
     with a "cas" command did not exist.
         """
         # validate key
-        _validate_key(key)
+        validate_key(key)
 
         if flags < 0 or exptime < 0:
             raise ValidationException(
@@ -331,7 +334,7 @@ class Client(object):
         deleted by a client).
         """
         # validate keys
-        [_validate_key(key) for key in keys]
+        [validate_key(key) for key in keys]
 
         end_symbol = b'END\r\n'
 
@@ -449,7 +452,7 @@ class Client(object):
         of all existing items.
         """
         # validate key
-        _validate_key(key)
+        validate_key(key)
 
         raw_cmd = b'delete %b\r\n' % key
         response_stream = await self._execute_raw_cmd(
@@ -512,7 +515,7 @@ class Client(object):
         optimization, so you also shouldn't rely on that.
         """
         # validate key
-        _validate_key(key)
+        validate_key(key)
 
         if value < 0:
             raise ValidationException(
@@ -592,7 +595,7 @@ The response line to this command can be one of:
   found.
         """
         # validate key
-        _validate_key(key)
+        validate_key(key)
 
         raw_cmd = b'touch %b %d\r\n' % (key, exptime)
         response_stream = await self._execute_raw_cmd(

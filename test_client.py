@@ -5,6 +5,7 @@ from sys import version_info
 import pytest
 from unittest import mock
 
+from aiomemcached.client import validate_key
 from aiomemcached.exceptions import ClientException, ValidationException
 
 
@@ -30,6 +31,39 @@ async def assert_raise_with_mocked_execute_raw_cmd(
 async def test_close(client):
     await client.close()
     assert client._pool.size() == 0
+
+
+def test_validate_key():
+    good_key = b'test:key:good_key'
+    validate_key(good_key)
+
+    good_key = bytes('test:key:中文', encoding='utf-8')
+    validate_key(good_key)
+
+    good_key = bytes('test:key:こんにちは', encoding='utf-8')
+    validate_key(good_key)
+
+    good_key = bytes('test:key:안녕하세요', encoding='utf-8')
+    validate_key(good_key)
+
+    good_key = bytes('test:key:!@#', encoding='utf-8')
+    validate_key(good_key)
+
+    bad_key = b'test:key:have space'
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
+
+    bad_key = b'test:key:have_newline\r'
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
+
+    bad_key = b'test:key:have_newline\n'
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
+
+    bad_key = b'test:key:too_long' + bytes(250)
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
 
 
 @pytest.mark.asyncio
@@ -58,6 +92,8 @@ async def test_get_set(client):
 
     result = await client.get(key)
     assert result is None
+
+    # set flag TODO
 
     # set param errors ---
     with pytest.raises(ValidationException):
