@@ -52,11 +52,6 @@ def acquire(func):
         try:
             return await func(self, conn, *args, **kwargs)
 
-        except Exception as exc:
-            # conn[0].set_exception(exc)
-            raise Exception(exc)
-            # raise  # TODO
-
         finally:
             await self._pool.release(conn)
 
@@ -106,12 +101,7 @@ class Client(object):
 
             if one_line_response:
                 break
-            if line[:len(end_symbols[0])] == end_symbols[0]:
-                # line.startwith(end_symbols[0]) # TODO
-                break
             if line in end_symbols:
-                break
-            if line.rstrip(b'\r\n') in end_symbols:
                 break
 
         response_stream.seek(0)
