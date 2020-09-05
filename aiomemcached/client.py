@@ -715,7 +715,7 @@ The response line to this command can be one of:
         versions = response.rstrip(b'\r\n').split(maxsplit=1)
         return versions[1]
 
-    async def flush_all(self) -> None:
+    async def flush_all(self) -> bool:
         """Its effect is to invalidate all existing items immediately
 
         "flush_all" is a command with an optional numeric argument. It always
@@ -739,3 +739,5 @@ The response line to this command can be one of:
 
         if not response.startswith(OK):
             raise ResponseException(raw_cmd, response_stream.getvalue())
+
+        return True
