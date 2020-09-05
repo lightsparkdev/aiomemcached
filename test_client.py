@@ -115,13 +115,42 @@ async def test_get_set(client):
     with pytest.raises(ValidationException):
         await client.set(key, value, flags=-1)
 
-    # storage error :TODO NOT_STORED, EXISTS, NOT_FOUND ?
+    # storage command error :TODO NOT_STORED, EXISTS, NOT_FOUND ?
     async def func():
         with pytest.raises(ResponseException):
             await client.set(key, value)
 
     await run_func_with_mocked_execute_raw_cmd(
-        client, b'ANY_OTHER_ERROR\r\n', func
+        client, b'SERVER_ERROR\r\n', func
+    )
+
+    # retrieval command error ---
+    async def func_r_server(*args, **kwargs):
+        with pytest.raises(ResponseException):
+            await client.get(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'SERVER_ERROR\r\n', func_r_server, key
+    )
+
+    async def func_r_dup(*args, **kwargs):
+        with pytest.raises(ClientException):
+            await client.get(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client,
+        b'VALUE %b 0 1\r\n1\r\nVALUE %b 0 1\r\n1\r\n' % (key, key),
+        func_r_dup, key
+    )
+
+    async def func_r_too_many(*args, **kwargs):
+        with pytest.raises(ClientException):
+            await client.get(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client,
+        b'VALUE %b 0 1\r\n1\r\nVALUE %b 0 1\r\n1\r\n' % (key, key + b'other'),
+        func_r_too_many, key
     )
 
 
@@ -304,6 +333,14 @@ async def test_delete(client):
     is_deleted = await client.delete(b'not:key')
     assert not is_deleted
 
+    async def func(*args, **kwargs):
+        with pytest.raises(ResponseException):
+            await client.delete(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'SERVER_ERROR\r\n', func, key
+    )
+
 
 @pytest.mark.asyncio
 async def test_incr_decr(client):
@@ -374,7 +411,7 @@ async def test_incr_decr(client):
             await client.incr(*args, **kwargs)
 
     await run_func_with_mocked_execute_raw_cmd(
-        client, b'ANY_OTHER_ERROR\r\n', func_2, b'not:' + key
+        client, b'SERVER_ERROR\r\n', func_2, b'not:' + key
     )
 
 
@@ -403,7 +440,7 @@ async def test_touch(client):
             await client.touch(*args, **kwargs)
 
     await run_func_with_mocked_execute_raw_cmd(
-        client, b'ANY_OTHER_ERROR\r\n', func, b'not:' + key, 1
+        client, b'SERVER_ERROR\r\n', func, b'not:' + key, 1
     )
 
 
@@ -411,6 +448,24 @@ async def test_touch(client):
 async def test_stats(client):
     stats = await client.stats()
     assert b'pid' in stats
+
+    async def func():
+        await client.stats()
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client,
+        b'STAT a\r\nSTAT a b\r\nSTAT a b c\r\nEND\r\n',
+        func
+    )
+
+    # bad response
+    async def func_bad_response():
+        with pytest.raises(ResponseException):
+            await client.stats()
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'BAD_RESPONSE\r\nEND\r\n', func_bad_response
+    )
 
 
 @pytest.mark.asyncio

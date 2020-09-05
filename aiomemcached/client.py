@@ -109,6 +109,8 @@ class Client(object):
             if line[:len(end_symbols[0])] == end_symbols[0]:
                 # line.startwith(end_symbols[0]) # TODO
                 break
+            if line in end_symbols:
+                break
             if line.rstrip(b'\r\n') in end_symbols:
                 break
 
@@ -224,7 +226,7 @@ class Client(object):
         response_stream = await self._execute_raw_cmd(
             cmd=raw_cmd, one_line_response=True
         )
-        response = response_stream.readline().rstrip(b'\r\n')
+        response = response_stream.readline()
         if response == STORED:
             return True
 
@@ -345,20 +347,18 @@ class Client(object):
         # validate keys
         [validate_key(key) for key in keys]
 
-        end_symbol = b'END\r\n'
-
         cmd_format = b'gets %b\r\n' if with_cas else b'get %b\r\n'
         raw_cmd = cmd_format % b' '.join(keys)
 
         response_stream = await self._execute_raw_cmd(
-            cmd=raw_cmd, end_symbols=[end_symbol, ]
+            cmd=raw_cmd, end_symbols=[END, ]
         )
 
         received = {}
         cas_tokens = {}
 
         line = response_stream.readline()
-        while line != b'' and line != end_symbol:
+        while line != b'' and line != END:
             terms = line.split()
 
             if terms[0] == b'VALUE':  # exists
@@ -472,7 +472,7 @@ class Client(object):
         response_stream = await self._execute_raw_cmd(
             cmd=raw_cmd, one_line_response=True
         )
-        response = response_stream.readline().rstrip(b'\r\n')
+        response = response_stream.readline()
         if response == DELETED:
             return True
 
@@ -543,7 +543,7 @@ class Client(object):
         response_stream = await self._execute_raw_cmd(
             cmd=raw_cmd, one_line_response=True
         )
-        response = response_stream.readline().rstrip(b'\r\n')
+        response = response_stream.readline()
 
         try:
             if response == NOT_FOUND:
@@ -616,7 +616,7 @@ The response line to this command can be one of:
         response_stream = await self._execute_raw_cmd(
             cmd=raw_cmd, one_line_response=True
         )
-        response = response_stream.readline().rstrip(b'\r\n')
+        response = response_stream.readline()
 
         if response == TOUCHED:
             return True
@@ -657,7 +657,7 @@ The response line to this command can be one of:
         )
 
         result = {}
-        line = response_stream.readline().strip(b'\r\n')
+        line = response_stream.readline()
         while line != END:
             terms = line.split()
 
@@ -670,7 +670,7 @@ The response line to this command can be one of:
             else:
                 raise ResponseException(raw_cmd, response_stream.getvalue())
 
-            line = response_stream.readline().strip(b'\r\n')
+            line = response_stream.readline()
 
         return result
 
