@@ -148,6 +148,16 @@ async def test_get_set(client):
         func_r_dup, key
     )
 
+    async def func_r_data_len(*args, **kwargs):
+        with pytest.raises(ClientException):
+            await client.get(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client,
+        b'VALUE %b 0 1\r\n12\r\n' % key,
+        func_r_data_len, key
+    )
+
     async def func_r_too_many(*args, **kwargs):
         with pytest.raises(ClientException):
             await client.get(*args, **kwargs)
@@ -212,7 +222,7 @@ async def test_get_many_set(client):
 
     keys = [b'not' + key_1, key_2]
     result, _ = await client.get_many(keys)
-    assert key_1 not in result  # TODO default ??!!
+    assert key_1 not in result
 
     keys = []
     result, _ = await client.get_many(keys)
@@ -230,8 +240,12 @@ async def test_gets_many_set(client):
     result_value, result_cas = await client.gets_many(keys)
     assert result_value[key_1] == value_1
     assert result_value[key_2] == value_2
-    # assert isinstance(result_cas[key_1], int) # TODO!!!
-    # assert isinstance(result_cas[key_2], int)
+    assert isinstance(result_cas[key_1].get('flags'), int)
+    assert isinstance(result_cas[key_2].get('cas'), int)
+
+    keys = []
+    result, _ = await client.gets_many(keys)
+    assert len(result) == 0
 
 
 @pytest.mark.asyncio

@@ -362,28 +362,36 @@ class Client(object):
         while line != b'' and line != END:
             terms = line.split()
 
-            if terms[0] == b'VALUE':  # exists
-                key = terms[1]
-                data_len = int(terms[3])
+            if terms[0] != b'VALUE':
+                raise ResponseException(raw_cmd, response_stream.getvalue())
 
-                if key in values:
-                    raise ClientException(
-                        'Memcached::[{}] Duplicate results from server:{}'
-                        ''.format(raw_cmd, response_stream.getvalue())
-                    )
+            # exists
+            key = terms[1]
+            if key in values:
+                raise ClientException(
+                    'Memcached::[{}] Duplicate results from server:{}'
+                    ''.format(raw_cmd, response_stream.getvalue())
+                )
 
-                data = response_stream.read(data_len + 2)[:-2]  # TODO readline
+            data = response_stream.readline().rstrip(b'\r\n')
+            try:
                 flags = int(terms[2])
                 cas = int(terms[4]) if with_cas else None
+                data_len = int(terms[3])
 
-                values[key] = data
-                info[key] = {
-                    'flags': flags,
-                    'cas': cas,
-                }
+                if len(data) != data_len:
+                    raise ValueError
 
-            else:
-                raise ResponseException(raw_cmd, response_stream.getvalue())
+            except ValueError:
+                raise ResponseException(
+                    raw_cmd, response_stream.getvalue()
+                )
+
+            values[key] = data
+            info[key] = {
+                'flags': flags,
+                'cas': cas,
+            }
 
             line = response_stream.readline()
 
@@ -413,7 +421,7 @@ class Client(object):
         values, info = await self._retrieval_command(keys, with_cas=True)
         return values.get(key, default), info.get(key, dict())
 
-    async def get_many(self, keys: List[bytes]) -> (
+    async def get_many(self, keys: List[bytes]) -> (  # TODO default?!
         Dict[bytes, bytes], Dict[bytes, Dict[bytes, Optional[int]]]
     ):
         """Takes a list of keys and returns a list of values.
