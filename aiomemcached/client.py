@@ -7,7 +7,13 @@ from typing import List, Dict, Union
 
 from .constants import *
 from .pool import MemcachedPool, MemcachedConnection
-from .exceptions import ClientException, ValidationException
+from .exceptions import (
+    ClientException,
+
+    ValidationException,
+    TimeoutException,
+    ResponseException
+)
 
 """
 Ref: https://github.com/memcached/memcached/blob/master/doc/protocol.txt
@@ -25,18 +31,16 @@ def validate_key(key: bytes):
     """A key (arbitrary string up to 250 bytes in length.
     No space or newlines for ASCII mode)
     """
-    if not isinstance(key, bytes):  # avoid bugs subtle and otherwise
-        raise ValidationException('key must be bytes', key)
+    if not isinstance(key, bytes):  # TODO maybe remove in next version?
+        raise ValidationException(
+            'key must be bytes:{}'.format(key))
 
     m = _VALIDATE_KEY_RE.match(key)
-    if m:
-        # in python re, $ matches either end of line or right before
-        # \n at end of line. We can't allow latter case, so
-        # making sure length matches is simplest way to detect
-        if len(m.group(0)) != len(key):
-            raise ValidationException('trailing newline', key)
-    else:
-        raise ValidationException('invalid key', key)
+    if not m or len(m.group(0)) != len(key):
+        raise ValidationException(
+            'A key (arbitrary string up to 250 bytes in length. '
+            'No space or newlines for ASCII mode):{}'.format(key)
+        )
 
     return key
 
@@ -79,8 +83,11 @@ class Client(object):
     @acquire
     async def _execute_raw_cmd(
         self, conn: MemcachedConnection, cmd: bytes,
-        end_symbols: List[bytes] = None, one_line_response: bool = False
+        one_line_response: bool = False, end_symbols: List[bytes] = None
     ) -> BytesIO:
+        """
+        skip end_symbols if one_line_response is True
+        """
         if end_symbols is None:
             end_symbols = list()
 
@@ -93,14 +100,14 @@ class Client(object):
                     conn.reader.readline(), timeout=self._timeout
                 )
             except asyncio.TimeoutError as e:
-                raise Exception(e)
-                # break
+                raise TimeoutException(e)  # TODO test
 
             response_stream.write(line)
 
             if one_line_response:
                 break
             if line[:len(end_symbols[0])] == end_symbols[0]:
+                # line.startwith(end_symbols[0]) # TODO
                 break
             if line.rstrip(b'\r\n') in end_symbols:
                 break
@@ -201,9 +208,8 @@ class Client(object):
 
         if flags < 0 or exptime < 0:
             raise ValidationException(
-                'flags and exptime must be unsigned integer'.format(
-                    flags, exptime
-                )
+                'flags:[{}] and exptime:[{}] must be unsigned integer'
+                ''.format(flags, exptime)
             )
 
         if cas:
@@ -216,14 +222,17 @@ class Client(object):
             )
 
         response_stream = await self._execute_raw_cmd(
-            cmd=raw_cmd, end_symbols=[STORED, NOT_STORED, EXISTS, NOT_FOUND]
+            cmd=raw_cmd, one_line_response=True
         )
-        if response_stream.readline().rstrip(b'\r\n') == STORED:
+        response = response_stream.readline().rstrip(b'\r\n')
+        if response == STORED:
             return True
 
-        else:
-            # TODO rasie with status , depend option raise_exp?
+        elif response in (NOT_STORED, EXISTS, NOT_FOUND):
+            # TODO raise with status , depend option raise_exp?
             return False
+
+        raise ResponseException(raw_cmd, response_stream.getvalue())
 
     async def set(
         self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
@@ -339,10 +348,10 @@ class Client(object):
         end_symbol = b'END\r\n'
 
         cmd_format = b'gets %b\r\n' if with_cas else b'get %b\r\n'
-        cmd = cmd_format % b' '.join(keys)
+        raw_cmd = cmd_format % b' '.join(keys)
 
         response_stream = await self._execute_raw_cmd(
-            cmd=cmd, end_symbols=[end_symbol, ]
+            cmd=raw_cmd, end_symbols=[end_symbol, ]
         )
 
         received = {}
@@ -357,26 +366,31 @@ class Client(object):
                 flags = int(terms[2])
                 length = int(terms[3])
 
-                if flags != 0:
-                    raise ClientException('received non zero flags')
+                if flags != 0:  # TODO ?
+                    raise ClientException(
+                        'Memcached::[{}] received non zero flags:{}'
+                        ''.format(raw_cmd, response_stream.getvalue())
+                    )
 
                 val = response_stream.read(length + 2)[:-2]
                 if key in received:
-                    raise ClientException('duplicate results from server')
-
+                    raise ClientException(
+                        'Memcached::[{}] Duplicate results from server:{}'
+                        ''.format(raw_cmd, response_stream.getvalue())
+                    )
                 received[key] = val
                 cas_tokens[key] = int(terms[4]) if with_cas else None
 
             else:
-                raise ClientException('get failed {} {}'.format(
-                    line, received
-                ))
+                raise ResponseException(raw_cmd, response_stream.getvalue())
 
             line = response_stream.readline()
 
         if len(received) > len(keys):
-            raise ClientException('received too many responses')
-
+            raise ClientException(
+                'Memcached::[{}] received too many responses:{}'
+                ''.format(raw_cmd, response_stream.readline())
+            )
         return received, cas_tokens
 
     async def get(self, key: bytes, default: bytes = None) -> bytes:
@@ -456,14 +470,17 @@ class Client(object):
 
         raw_cmd = b'delete %b\r\n' % key
         response_stream = await self._execute_raw_cmd(
-            cmd=raw_cmd, end_symbols=[STORED, DELETED, NOT_FOUND]
+            cmd=raw_cmd, one_line_response=True
         )
-        if response_stream.readline().rstrip(b'\r\n') == DELETED:
+        response = response_stream.readline().rstrip(b'\r\n')
+        if response == DELETED:
             return True
 
-        else:
-            # TODO rasie with status , depend option raise_exp?
+        elif response == NOT_FOUND:
+            # TODO raise with status , depend option raise_exp?
             return False
+
+        raise ResponseException(raw_cmd, response_stream.getvalue())
 
     async def _incr_decr(
         self, cmd: bytes, key: bytes, value: int
@@ -517,9 +534,9 @@ class Client(object):
         # validate key
         validate_key(key)
 
-        if value < 0:
+        if value < 0 or not isinstance(value, int):
             raise ValidationException(
-                'value is must be unsigned integer', value
+                'value:[{}]  must be unsigned integer'.format(value)
             )
 
         raw_cmd = b'%b %b %d\r\n' % (cmd, key, value)
@@ -530,15 +547,13 @@ class Client(object):
 
         try:
             if response == NOT_FOUND:
-                # return None
-                raise ValueError
+                # TODO raise with status , depend option raise_exp?
+                return None
+
             new_value = int(response)
 
         except ValueError:
-            # TODO raise with status , depend option raise_exp?
-            raise ClientException(
-                'Memcached {} command failed'.format(str(raw_cmd)), response)
-            # return None
+            raise ResponseException(raw_cmd, response_stream.getvalue())
 
         return new_value
 
@@ -599,14 +614,18 @@ The response line to this command can be one of:
 
         raw_cmd = b'touch %b %d\r\n' % (key, exptime)
         response_stream = await self._execute_raw_cmd(
-            cmd=raw_cmd, end_symbols=[TOUCHED, NOT_FOUND]
+            cmd=raw_cmd, one_line_response=True
         )
-        if response_stream.readline().rstrip(b'\r\n') == TOUCHED:
+        response = response_stream.readline().rstrip(b'\r\n')
+
+        if response == TOUCHED:
             return True
 
-        else:
+        elif response == NOT_FOUND:
             # TODO raise with status , depend option raise_exp?
             return False
+
+        raise ResponseException(raw_cmd, response_stream.getvalue())
 
     async def stats(self, args: bytes = None) -> dict:
         """
@@ -634,12 +653,12 @@ The response line to this command can be one of:
 
         raw_cmd = b'stats %b\r\n' % args
         response_stream = await self._execute_raw_cmd(
-            cmd=raw_cmd, end_symbols=[b'END\r\n', ]
+            cmd=raw_cmd, end_symbols=[END, ]
         )
 
         result = {}
-        line = response_stream.readline()
-        while line != b'END\r\n':
+        line = response_stream.readline().strip(b'\r\n')
+        while line != END:
             terms = line.split()
 
             if len(terms) == 2 and terms[0] == b'STAT':
@@ -649,38 +668,61 @@ The response line to this command can be one of:
             elif len(terms) >= 3 and terms[0] == b'STAT':
                 result[terms[1]] = b' '.join(terms[2:])
             else:
-                raise ClientException('stats failed', line)
+                raise ResponseException(raw_cmd, response_stream.getvalue())
 
-            line = response_stream.readline()
+            line = response_stream.readline().strip(b'\r\n')
 
         return result
 
     async def version(self) -> bytes:
-        """Current version of the server.
-
-        :return: ``bytes``, memcached version for current the server.
         """
-        cmd = b'version\r\n'
-        response_stream = await self._execute_raw_cmd(
-            cmd=cmd, end_symbols=[VERSION, ]
-        )
+        "version" is a command with no arguments:
 
+        version\r\n
+
+        In response, the server sends
+
+        "VERSION <version>\r\n", where <version> is the version string for the
+        server.
+
+        "verbosity" is a command with a numeric argument. It always succeeds,
+        and the server sends "OK\r\n" in response (unless "noreply" is given
+        as the last parameter). Its effect is to set the verbosity level of
+        the logging output.
+        """
+        raw_cmd = b'version\r\n'
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, one_line_response=True
+        )
         response = response_stream.readline()
+
         if not response.startswith(VERSION):
-            raise ClientException('Memcached version failed', response)
+            raise ResponseException(raw_cmd, response_stream.getvalue())
 
         versions = response.rstrip(b'\r\n').split(maxsplit=1)
         return versions[1]
 
     async def flush_all(self) -> None:
-        """Its effect is to invalidate all existing items immediately"""
-        cmd = b'flush_all\r\n'
-        response_stream = await self._execute_raw_cmd(
-            cmd=cmd, end_symbols=[OK, ]
-        )
+        """Its effect is to invalidate all existing items immediately
 
+        "flush_all" is a command with an optional numeric argument. It always
+        succeeds, and the server sends "OK\r\n" in response (unless "noreply"
+        is given as the last parameter). Its effect is to invalidate all
+        existing items immediately (by default) or after the expiration
+        specified.  After invalidation none of the items will be returned in
+        response to a retrieval command (unless it's stored again under the
+        same key *after* flush_all has invalidated the items). flush_all
+        doesn't actually free all the memory taken up by existing items; that
+        will happen gradually as new items are stored. The most precise
+        definition of what flush_all does is the following: it causes all
+        items whose update time is earlier than the time at which flush_all
+        was set to be executed to be ignored for retrieval purposes.
+        """
+        raw_cmd = b'flush_all\r\n'
+        response_stream = await self._execute_raw_cmd(
+            cmd=raw_cmd, one_line_response=True
+        )
         response = response_stream.readline()
+
         if not response.startswith(OK):
-            raise ClientException(
-                'Memcached flush_all failed', response_stream.getvalue()
-            )
+            raise ResponseException(raw_cmd, response_stream.getvalue())

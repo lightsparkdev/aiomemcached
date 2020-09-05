@@ -6,11 +6,16 @@ import pytest
 from unittest import mock
 
 from aiomemcached.client import validate_key
-from aiomemcached.exceptions import ClientException, ValidationException
+from aiomemcached.exceptions import (
+    ClientException,
+
+    ValidationException,
+    ResponseException,
+)
 
 
-async def assert_raise_with_mocked_execute_raw_cmd(
-    client, server_response: bytes, exception, func, *args, **kwargs
+async def run_func_with_mocked_execute_raw_cmd(
+    client, server_response: bytes, func, *args, **kwargs
 ):
     if version_info.major <= 3 and version_info.minor <= 7:
         # py37
@@ -23,8 +28,7 @@ async def assert_raise_with_mocked_execute_raw_cmd(
 
     with mock.patch.object(client, '_execute_raw_cmd') as patched:
         patched.return_value = response
-        with pytest.raises(exception):
-            await func(*args, **kwargs)
+        await func(*args, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -49,6 +53,10 @@ def test_validate_key():
     good_key = bytes('test:key:!@#', encoding='utf-8')
     validate_key(good_key)
 
+    bad_key = 'this_is_string'
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
+
     bad_key = b'test:key:have space'
     with pytest.raises(ValidationException):
         validate_key(bad_key)
@@ -58,6 +66,10 @@ def test_validate_key():
         validate_key(bad_key)
 
     bad_key = b'test:key:have_newline\n'
+    with pytest.raises(ValidationException):
+        validate_key(bad_key)
+
+    bad_key = b'test:key:have_newline\nin_center'
     with pytest.raises(ValidationException):
         validate_key(bad_key)
 
@@ -72,6 +84,7 @@ async def test_get_set(client):
     default = b'default'
     exptime = 1
 
+    # get set
     await client.set(key, value)
 
     result = await client.get(key)
@@ -101,6 +114,15 @@ async def test_get_set(client):
 
     with pytest.raises(ValidationException):
         await client.set(key, value, flags=-1)
+
+    # storage error :TODO NOT_STORED, EXISTS, NOT_FOUND ?
+    async def func():
+        with pytest.raises(ResponseException):
+            await client.set(key, value)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'ANY_OTHER_ERROR\r\n', func
+    )
 
 
 @pytest.mark.asyncio
@@ -278,11 +300,6 @@ async def test_delete(client):
     test_value = await client.get(key)
     assert test_value is None
 
-    # await _assert_raise_with_mocked_execute_raw_cmd(
-    #     client, b'SERVER_ERROR error\r\n', ClientException,
-    #     client.delete, b'not:' + key
-    # )
-
     # delete key not exists
     is_deleted = await client.delete(b'not:key')
     assert not is_deleted
@@ -308,7 +325,7 @@ async def test_incr_decr(client):
     with pytest.raises(ClientException):
         await client.incr(key, 2)
 
-    with pytest.raises(ClientException):
+    with pytest.raises(ValidationException):
         await client.incr(key, 3.14)
 
     # decr ---
@@ -331,7 +348,7 @@ async def test_incr_decr(client):
     with pytest.raises(ClientException):
         await client.decr(key, 2)
 
-    with pytest.raises(ClientException):
+    with pytest.raises(ValidationException):
         await client.decr(key, 3.14)
 
     # common --
@@ -340,12 +357,24 @@ async def test_incr_decr(client):
     await client.incr(key, increment=1)
     await client.decr(key, decrement=1)
 
-    with pytest.raises(ValidationException):
+    with pytest.raises(ClientException):
         await client.incr(key, value=-1)
 
-    await assert_raise_with_mocked_execute_raw_cmd(
-        client, b'NOT_FOUND\r\n', ClientException,
-        client.incr, b'not:' + key
+    # NOT_FOUND
+    async def func_1(*args, **kwargs):
+        result = await client.incr(*args, **kwargs)
+        assert result is None
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'NOT_FOUND\r\n', func_1, b'not:' + key
+    )
+
+    async def func_2(*args, **kwargs):
+        with pytest.raises(ResponseException):
+            await client.incr(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'ANY_OTHER_ERROR\r\n', func_2, b'not:' + key
     )
 
 
@@ -354,8 +383,8 @@ async def test_touch(client):
     key, value = b'test:key:touch:1', b'17'
     await client.set(key, value)
 
-    test_value = await client.touch(key, 1)
-    assert test_value
+    touched = await client.touch(key, 1)
+    assert touched
 
     test_value = await client.get(key)
     assert test_value == value
@@ -365,13 +394,17 @@ async def test_touch(client):
     test_value = await client.get(key)
     assert test_value is None
 
-    test_value = await client.touch(b'not:' + key, 1)
-    assert not test_value
+    # NOT_FOUND
+    touched = await client.touch(b'not:' + key, 1)
+    assert not touched
 
-    # await _do_mock_execute_raw_cmd(
-    #     client, b'SERVER_ERROR error\r\n', ClientException,
-    #     client.touch, b'not:' + key, 1
-    # )
+    async def func(*args, **kwargs):
+        with pytest.raises(ResponseException):
+            await client.touch(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'ANY_OTHER_ERROR\r\n', func, b'not:' + key, 1
+    )
 
 
 @pytest.mark.asyncio
@@ -386,9 +419,12 @@ async def test_version(client):
     stats = await client.stats()
     assert version == stats[b'version']
 
-    await assert_raise_with_mocked_execute_raw_cmd(
-        client, b'SERVER_ERROR error\r\n', ClientException,
-        client.version
+    async def func():
+        with pytest.raises(ResponseException):
+            await client.version()
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'NOT_VERSION\r\n', func
     )
 
 
@@ -405,7 +441,10 @@ async def test_flush_all(client):
     test_value = await client.get(key)
     assert test_value is None
 
-    await assert_raise_with_mocked_execute_raw_cmd(
-        client, b'SERVER_ERROR error\r\n', ClientException,
-        client.flush_all
+    async def func():
+        with pytest.raises(ResponseException):
+            await client.flush_all()
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client, b'NOT_OK\r\n', func
     )

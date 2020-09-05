@@ -1,14 +1,27 @@
-__all__ = ['ClientException', 'ValidationException']
+__all__ = [
+    'ClientException',
+
+    'ValidationException',
+    'TimeoutException',
+    'ResponseException',
+]
 
 
 class ClientException(Exception):
-    """Raised when the server does something we don't expect."""
-
-    def __init__(self, msg, item=None):
-        if item is not None:
-            msg = '%s: %r' % (msg, item)
-        super().__init__(msg)
+    """Base Exception for AioMemCached"""
+    pass
 
 
 class ValidationException(ClientException):
-    """Raised when an invalid parameter is passed to a ``Client`` function."""
+    pass
+
+
+class TimeoutException(ClientException):
+    pass
+
+
+class ResponseException(ClientException):
+    def __init__(self, raw_cmd, response):
+        super().__init__('Memcached::[{}] response is not expected:{}'.format(
+            raw_cmd, response
+        ))
