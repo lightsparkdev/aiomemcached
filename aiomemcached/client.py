@@ -3,7 +3,7 @@ import functools
 import asyncio
 import warnings
 from io import BytesIO
-from typing import List, Dict, Union
+from typing import List, Dict, Optional
 
 from .constants import *
 from .pool import MemcachedPool, MemcachedConnection
@@ -291,7 +291,7 @@ class Client(object):
 
     async def _retrieval_command(
         self, keys: List[bytes], with_cas: bool = False
-    ) -> (Dict[bytes, bytes], Dict[bytes, bytes]):
+    ) -> (Dict[bytes, bytes], Dict[bytes, Dict[bytes, Optional[int]]]):
         """
         Retrieval command:
         ------------------
@@ -344,8 +344,19 @@ class Client(object):
             cmd=raw_cmd, end_symbols=[END, ]
         )
 
-        received = {}
-        cas_tokens = {}
+        values = {}
+        info = {}
+        # values = {
+        #     key: data,
+        #     ...
+        # }
+        # info = {
+        #     key: {
+        #         'flags': flags,
+        #         'cas': cas,
+        #     },
+        #     ...
+        # }
 
         line = response_stream.readline()
         while line != b'' and line != END:
@@ -353,60 +364,72 @@ class Client(object):
 
             if terms[0] == b'VALUE':  # exists
                 key = terms[1]
-                flags = int(terms[2])
-                length = int(terms[3])
+                data_len = int(terms[3])
 
-                if flags != 0:  # TODO ?
-                    raise ClientException(
-                        'Memcached::[{}] received non zero flags:{}'
-                        ''.format(raw_cmd, response_stream.getvalue())
-                    )
-
-                val = response_stream.read(length + 2)[:-2]
-                if key in received:
+                if key in values:
                     raise ClientException(
                         'Memcached::[{}] Duplicate results from server:{}'
                         ''.format(raw_cmd, response_stream.getvalue())
                     )
-                received[key] = val
-                cas_tokens[key] = int(terms[4]) if with_cas else None
+
+                data = response_stream.read(data_len + 2)[:-2]  # TODO readline
+                flags = int(terms[2])
+                cas = int(terms[4]) if with_cas else None
+
+                values[key] = data
+                info[key] = {
+                    'flags': flags,
+                    'cas': cas,
+                }
 
             else:
                 raise ResponseException(raw_cmd, response_stream.getvalue())
 
             line = response_stream.readline()
 
-        if len(received) > len(keys):
+        if len(values) > len(keys):
             raise ClientException(
                 'Memcached::[{}] received too many responses:{}'
                 ''.format(raw_cmd, response_stream.readline())
             )
-        return received, cas_tokens
+        return values, info
 
-    async def get(self, key: bytes, default: bytes = None) -> bytes:
+    async def get(self, key: bytes, default: bytes = None) -> (
+        bytes, Dict[bytes, Optional[int]]
+    ):
         """Gets a single value from the server.
         """
         keys = [key, ]
-        received, _ = await self._retrieval_command(keys)
+        values, info = await self._retrieval_command(keys)
 
-        return received.get(key, default)
+        return values.get(key, default), info.get(key, dict())
 
-    async def gets(self, key: bytes, default: bytes = None) -> (bytes, bytes):
+    async def gets(self, key: bytes, default: bytes = None) -> (
+        bytes, Dict[bytes, Optional[int]]
+    ):
         """Gets a single value from the server together with the cas token.
         """
         keys = [key, ]
-        values, cases = await self._retrieval_command(keys, with_cas=True)
-        return values.get(key, default), cases.get(key)
+        values, info = await self._retrieval_command(keys, with_cas=True)
+        return values.get(key, default), info.get(key, dict())
 
-    async def get_many(self, keys: List[bytes]) -> Dict[bytes, bytes]:
+    async def get_many(self, keys: List[bytes]) -> (
+        Dict[bytes, bytes], Dict[bytes, Dict[bytes, Optional[int]]]
+    ):
         """Takes a list of keys and returns a list of values.
         """
-        values, _ = await self.gets_many(keys)
-        return values
+        # check keys
+        if len(keys) == 0:
+            return dict(), dict()
 
-    async def gets_many(
-        self, keys: List[bytes]
-    ) -> (Dict[bytes, bytes], Dict[bytes, bytes]):
+        keys = list(set(keys))  # ignore duplicate keys error
+
+        values, info = await self._retrieval_command(keys)
+        return values, info
+
+    async def gets_many(self, keys: List[bytes]) -> (
+        Dict[bytes, bytes], Dict[bytes, Dict[bytes, Optional[int]]]
+    ):
         """Takes a list of keys and returns a list of values
         together with the cas token.
         """
@@ -416,8 +439,8 @@ class Client(object):
 
         keys = list(set(keys))  # ignore duplicate keys error
 
-        values, cases = await self._retrieval_command(keys)
-        return values, cases
+        values, info = await self._retrieval_command(keys, with_cas=True)
+        return values, info
 
     async def multi_get(self, *args):
         """shadow for get_multi, DeprecationWarning"""
@@ -427,7 +450,7 @@ class Client(object):
             DeprecationWarning
         )
         keys = [arg for arg in args]
-        values = await self.get_many(keys)
+        values, _ = await self.get_many(keys)
         return tuple(values.get(key) for key in keys)
 
     async def delete(self, key: bytes) -> bool:
@@ -474,7 +497,7 @@ class Client(object):
 
     async def _incr_decr(
         self, cmd: bytes, key: bytes, value: int
-    ) -> Union[int, None]:
+    ) -> Optional[int]:
         """
         Increment/Decrement
         -------------------
@@ -549,7 +572,7 @@ class Client(object):
 
     async def incr(
         self, key: bytes, value: int = 1, increment: int = None
-    ) -> Union[int, None]:
+    ) -> Optional[int]:
         if increment:
             warnings.warn(
                 'incr() param increment is deprecated since AioMemcached 0.8, '
@@ -561,7 +584,7 @@ class Client(object):
 
     async def decr(
         self, key: bytes, value: int = 1, decrement: int = None
-    ) -> Union[int, None]:
+    ) -> Optional[int]:
         if decrement:
             warnings.warn(
                 'incr() param increment is deprecated since AioMemcached 0.8, '
