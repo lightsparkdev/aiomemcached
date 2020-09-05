@@ -1,6 +1,6 @@
 [run]
 source = aiomemcached
-omit = setup.py,conftest.py,test_*,venv*
+omit = setup.py,examples.py,conftest.py,test_*,venv*
 
 [html]
 directory = htmlcov

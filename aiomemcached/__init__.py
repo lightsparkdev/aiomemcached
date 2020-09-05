@@ -29,11 +29,13 @@ __version__ = '0.7.0'
 
 __author__ = 'Nikolay Kim'
 __author_email__ = 'fafhrd91@gmail.com'
-__maintainer__ = ', '.join((
+__maintainer__ = 'Rex Zhang <rex.zhang@gmail.com>'
+__contributions__ = [
     'Nikolay Kim <fafhrd91@gmail.com>',
     'Andrew Svetlov <andrew.svetlov@gmail.com>',
-    'Rex Zhang <rex.zhang@gmail.com',
-))
+    'Rex Zhang <rex.zhang@gmail.com>',
+]
+
 __licence__ = 'BSD'
 
 __description__ = 'A pure python asyncio memcached client,' \
