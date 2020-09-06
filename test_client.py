@@ -7,8 +7,6 @@ from unittest import mock
 
 from aiomemcached.client import validate_key
 from aiomemcached.exceptions import (
-    ClientException,
-
     ValidationException,
     ResponseException,
 )
@@ -78,6 +76,11 @@ def test_validate_key():
         validate_key(bad_key)
 
 
+def test_uri_parser():
+    uri_1 = 'memcached://localhost'
+    uri_2 = 'memcached://localhost:11211'
+
+
 @pytest.mark.asyncio
 async def test_get_set(client):
     key, value = b'test:key:get_set', b'1'
@@ -139,7 +142,7 @@ async def test_get_set(client):
     )
 
     async def func_r_dup(*args, **kwargs):
-        with pytest.raises(ClientException):
+        with pytest.raises(ResponseException):
             await client.get(*args, **kwargs)
 
     await run_func_with_mocked_execute_raw_cmd(
@@ -149,7 +152,7 @@ async def test_get_set(client):
     )
 
     async def func_r_data_len(*args, **kwargs):
-        with pytest.raises(ClientException):
+        with pytest.raises(ResponseException):
             await client.get(*args, **kwargs)
 
     await run_func_with_mocked_execute_raw_cmd(
@@ -159,7 +162,7 @@ async def test_get_set(client):
     )
 
     async def func_r_too_many(*args, **kwargs):
-        with pytest.raises(ClientException):
+        with pytest.raises(ResponseException):
             await client.get(*args, **kwargs)
 
     await run_func_with_mocked_execute_raw_cmd(
@@ -379,7 +382,7 @@ async def test_incr_decr(client):
     key, value = b'test:key:incr:2', b'string'
     await client.set(key, value)
 
-    with pytest.raises(ClientException):
+    with pytest.raises(ResponseException):
         await client.incr(key, 2)
 
     with pytest.raises(ValidationException):
@@ -402,7 +405,7 @@ async def test_incr_decr(client):
     key, value = b'test:key:decr:2', b'string'
     await client.set(key, value)
 
-    with pytest.raises(ClientException):
+    with pytest.raises(ResponseException):
         await client.decr(key, 2)
 
     with pytest.raises(ValidationException):
@@ -414,7 +417,7 @@ async def test_incr_decr(client):
     await client.incr(key, increment=1)
     await client.decr(key, decrement=1)
 
-    with pytest.raises(ClientException):
+    with pytest.raises(ValidationException):
         await client.incr(key, value=-1)
 
     # NOT_FOUND

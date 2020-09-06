@@ -2,8 +2,6 @@
 AioMemcached
 ============
 
-A pure-Python(3.7+) asyncio memcached client, fork from aiomcache.
-
 .. image:: https://travis-ci.org/rexzhang/aiomemcached.svg?branch=master
     :target: https://travis-ci.org/rexzhang/aiomemcached
 .. image:: https://img.shields.io/coveralls/rexzhang/aiomemcached.svg?branch=master
@@ -15,12 +13,13 @@ A pure-Python(3.7+) asyncio memcached client, fork from aiomcache.
 .. image:: https://img.shields.io/pypi/dm/aiomemcached.svg
     :target: https://pypi.org/project/aiomemcached/
 
+A pure-Python(3.7+) asyncio memcached client, fork from aiomcache.
+
 ============= =========================================
 Author        Nikolay Kim <fafhrd91@gmail.com>
 Maintainer    Rex Zhang <rex.zhang@gmail.com>
 Contributions Andrew Svetlov <andrew.svetlov@gmail.com>
 ============= =========================================
-
 
 Install
 =======

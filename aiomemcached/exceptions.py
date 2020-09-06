@@ -21,7 +21,10 @@ class TimeoutException(ClientException):
 
 
 class ResponseException(ClientException):
-    def __init__(self, raw_cmd, response):
-        super().__init__('Memcached::[{}] response is not expected:{}'.format(
-            raw_cmd, response
-        ))
+    def __init__(self, raw_cmd, response, ext_message=None):
+        message = 'Memcached::[{}] response is not expected:{}{}'.format(
+            raw_cmd,
+            '{}, '.format(ext_message) if ext_message else '',
+            response
+        )
+        super().__init__(message)

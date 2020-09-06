@@ -362,23 +362,24 @@ class Client(object):
         while line != b'' and line != END:
             terms = line.split()
 
-            if terms[0] != b'VALUE':
-                raise ResponseException(raw_cmd, response_stream.getvalue())
-
-            # exists
-            key = terms[1]
-            if key in values:
-                raise ClientException(
-                    'Memcached::[{}] Duplicate results from server:{}'
-                    ''.format(raw_cmd, response_stream.getvalue())
-                )
-
-            data = response_stream.readline().rstrip(b'\r\n')
             try:
+                if terms[0] != b'VALUE':
+                    raise ResponseException(
+                        raw_cmd, response_stream.getvalue()
+                    )
+
+                key = terms[1]
+                if key in values:
+                    raise ResponseException(
+                        raw_cmd, response_stream.getvalue(),
+                        ext_message='Duplicate results from server'
+                    )
+
                 flags = int(terms[2])
                 cas = int(terms[4]) if with_cas else None
                 data_len = int(terms[3])
 
+                data = response_stream.read(data_len + 2).rstrip(b'\r\n')
                 if len(data) != data_len:
                     raise ValueError
 
@@ -396,9 +397,9 @@ class Client(object):
             line = response_stream.readline()
 
         if len(values) > len(keys):
-            raise ClientException(
-                'Memcached::[{}] received too many responses:{}'
-                ''.format(raw_cmd, response_stream.readline())
+            raise ResponseException(
+                raw_cmd, response_stream.readline(),
+                ext_message='received too many responses'
             )
         return values, info
 
