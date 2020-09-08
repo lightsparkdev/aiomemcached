@@ -8,8 +8,6 @@ from typing import List, Dict, Optional
 from .constants import *
 from .pool import MemcachedPool, MemcachedConnection
 from .exceptions import (
-    ClientException,
-
     ValidationException,
     TimeoutException,
     ResponseException
@@ -25,6 +23,12 @@ __all__ = ['Client']
 # \x21 is !, right after space, and \x7e is -, right before DEL
 # also 1 <= len <= 250 as per the spec
 _VALIDATE_KEY_RE = re.compile(b'^[^\x00-\x20\x7f]{1,250}$')
+
+# URI: memcached://localhost:11211
+_URI_RE = re.compile(
+    r'^memcached://(?P<host>[.a-z0-9_-]+|[0-9]+.[0-9]+.[0-9]+.[0-9]+)'
+    r'(:(?P<port>[0-9]+))?'
+)
 
 
 def validate_key(key: bytes):
@@ -45,6 +49,25 @@ def validate_key(key: bytes):
     return key
 
 
+def uri_parser(uri: str) -> (str, Optional[int]):
+    m = re.match(_URI_RE, uri.lower())
+
+    try:
+        host = m.group('host')
+
+        port = m.group('port')
+        if port is None:
+            port = DEFAULT_SERVER_PORT
+
+        else:
+            port = int(port)
+
+    except AttributeError:
+        raise ValidationException('URI:{} parser failed!'.format(uri))
+
+    return host, port
+
+
 def acquire(func):
     @functools.wraps(func)
     async def wrapper(self, *args, **kwargs):
@@ -61,14 +84,23 @@ def acquire(func):
 class Client(object):
 
     def __init__(
-        self, host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT,
+        self, uri: str = None,
+        host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT,
         pool_minsize: int = DEFAULT_POOL_MINSIZE,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
         timeout: int = DEFAULT_TIMEOUT
     ):
+        if uri is None:
+            self._host = host
+            self._port = port
+
+        else:
+            self._host, self._port = uri_parser(uri)
+
         self._timeout = timeout
         self._pool = MemcachedPool(
-            host=host, port=port, minsize=pool_minsize, maxsize=pool_maxsize
+            host=self._host, port=self._port,
+            minsize=pool_minsize, maxsize=pool_maxsize
         )
 
     async def close(self):

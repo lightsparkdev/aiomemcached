@@ -5,7 +5,7 @@ from sys import version_info
 import pytest
 from unittest import mock
 
-from aiomemcached.client import validate_key
+from aiomemcached.client import validate_key, uri_parser, Client
 from aiomemcached.exceptions import (
     ValidationException,
     ResponseException,
@@ -77,8 +77,25 @@ def test_validate_key():
 
 
 def test_uri_parser():
-    uri_1 = 'memcached://localhost'
-    uri_2 = 'memcached://localhost:11211'
+    host = 'localhost'
+    port = 11211
+
+    result = uri_parser('memcached://localhost:11211')
+    assert result[0] == host
+    assert result[1] == port
+
+    result = uri_parser('memcached://localhost')
+    assert result[0] == host
+    assert result[1] == port
+
+    result = uri_parser('memcached://localhost:aaa')
+    assert result[0] == host
+    assert result[1] == port
+
+    with pytest.raises(ValidationException):
+        _ = uri_parser('BADmemcached://localhost')
+
+    _ = Client('memcached://localhost:11211')
 
 
 @pytest.mark.asyncio
@@ -149,6 +166,15 @@ async def test_get_set(client):
         client,
         b'VALUE %b 0 1\r\n1\r\nVALUE %b 0 1\r\n1\r\n' % (key, key),
         func_r_dup, key
+    )
+
+    async def func_r_data_include_new_line(*args, **kwargs):
+        await client.get(*args, **kwargs)
+
+    await run_func_with_mocked_execute_raw_cmd(
+        client,
+        b'VALUE %b 0 10\r\n_new\n_line\r\n' % key,
+        func_r_data_include_new_line, key
     )
 
     async def func_r_data_len(*args, **kwargs):

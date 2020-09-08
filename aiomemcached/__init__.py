@@ -20,9 +20,15 @@ Usage example::
 """
 
 from .client import Client
-from .exceptions import ClientException, ValidationException
+from .exceptions import (
+    ClientException, ValidationException, TimeoutException, ResponseException
+)
 
-__all__ = ('Client', 'ClientException', 'ValidationException')
+__all__ = (
+    'Client',
+    'ClientException',
+    'ValidationException', 'TimeoutException', 'ResponseException'
+)
 
 __name__ = 'AioMemcached'
 __version__ = '0.7.0'
