@@ -16,8 +16,8 @@ async def run_func_with_mocked_execute_raw_cmd(
     client, server_response: bytes, func, *args, **kwargs
 ):
     if version_info.major <= 3 and version_info.minor <= 7:
-        # py37
-        # object _io.BytesIO can't be used in 'await' expression
+        # TODO py38+
+        # py37 say: object _io.BytesIO can't be used in 'await' expression
         return
 
     response = BytesIO()
@@ -448,8 +448,7 @@ async def test_incr_decr(client):
 
     # NOT_FOUND
     async def func_1(*args, **kwargs):
-        result = await client.incr(*args, **kwargs)
-        assert result is None
+        assert await client.incr(*args, **kwargs) is None
 
     await run_func_with_mocked_execute_raw_cmd(
         client, b'NOT_FOUND\r\n', func_1, b'not:' + key

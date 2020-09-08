@@ -1,6 +1,15 @@
 CHANGES
 =======
 
+0.8.0 (2020-09-08)
+------------------
+- Rewrite almost code
+- Redesigned API
+- Support unicode string for key
+- Support flags
+- Support URI
+- More test coverage
+
 0.7.0 (2020-08-28)
 ------------------
 - Change pypi packages name to aiomemcached
