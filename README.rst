@@ -157,6 +157,3 @@ Coverage Report
 .. code-block:: shell
 
     python -m pytest --cov=. --cov-report html
-
-
-.. include:: CHANGES.rst
