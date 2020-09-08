@@ -44,6 +44,6 @@ __contributions__ = [
 
 __licence__ = 'BSD'
 
-__description__ = 'A pure python asyncio memcached client,' \
-                  ' fork from aiomcache.'
+__description__ = 'A pure-Python(3.7+) asyncio memcached client,' \
+                  ' fork from aiomcache. '
 __project_url__ = 'https://github.com/rexzhang/aiomemcached'
