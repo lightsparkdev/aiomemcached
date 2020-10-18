@@ -5,7 +5,15 @@ import warnings
 from io import BytesIO
 from typing import List, Dict, Optional
 
-from .constants import *
+from .constants import (
+    DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT,
+    DEFAULT_POOL_MINSIZE, DEFAULT_POOL_MAXSIZE,
+    DEFAULT_TIMEOUT, DEFAULT_KEY_LENGTH, DEFAULT_VALUE_LENGTH,
+
+    STORED, NOT_STORED, EXISTS, NOT_FOUND, DELETED, TOUCHED,
+
+    END, VERSION, OK
+)
 from .pool import MemcachedPool, MemcachedConnection
 from .exceptions import (
     ValidationException,
@@ -14,7 +22,9 @@ from .exceptions import (
 )
 
 """
-Ref: https://github.com/memcached/memcached/blob/master/doc/protocol.txt
+Ref: 
+- https://github.com/memcached/memcached/blob/master/doc/protocol.txt
+- # https://dzone.com/refcardz/getting-started-with-memcached
 """
 
 __all__ = ['Client']
@@ -22,7 +32,7 @@ __all__ = ['Client']
 # key supports ascii sans space and control chars
 # \x21 is !, right after space, and \x7e is -, right before DEL
 # also 1 <= len <= 250 as per the spec
-_VALIDATE_KEY_RE = re.compile(b'^[^\x00-\x20\x7f]{1,250}$')
+_VALIDATE_KEY_RE = re.compile(b'^[^\x00-\x20\x7f]{1,%d}$' % DEFAULT_KEY_LENGTH)
 
 # URI: memcached://localhost:11211
 _URI_RE = re.compile(
@@ -88,7 +98,8 @@ class Client(object):
         host: str = DEFAULT_SERVER_HOST, port: int = DEFAULT_SERVER_PORT,
         pool_minsize: int = DEFAULT_POOL_MINSIZE,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
-        timeout: int = DEFAULT_TIMEOUT
+        timeout: int = DEFAULT_TIMEOUT,
+        value_length: int = DEFAULT_VALUE_LENGTH,
     ):
         if uri is None:
             self._host = host
@@ -98,6 +109,7 @@ class Client(object):
             self._host, self._port = uri_parser(uri)
 
         self._timeout = timeout
+        self._value_length = value_length
         self._pool = MemcachedPool(
             host=self._host, port=self._port,
             minsize=pool_minsize, maxsize=pool_maxsize
@@ -262,6 +274,11 @@ class Client(object):
         self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
     ) -> bool:
         """"set" means "store this data"."""
+        if len(value) > self._value_length:
+            raise ValidationException(
+                'A value up to {} bytes in length.'.format(len(value))
+            )
+
         return await self._storage_command(
             cmd=b'set', key=key, value=value, flags=flags, exptime=exptime
         )
