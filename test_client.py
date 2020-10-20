@@ -5,7 +5,11 @@ from sys import version_info
 import pytest
 from unittest import mock
 
-from aiomemcached.client import validate_key, uri_parser, Client
+from aiomemcached.constants import (
+    DEFAULT_MAX_KEY_LENGTH,
+    DEFAULT_MAX_VALUE_LENGTH
+)
+from aiomemcached.client import Client
 from aiomemcached.exceptions import (
     ValidationException,
     ResponseException,
@@ -35,65 +39,67 @@ async def test_close(client):
     assert client._pool.size() == 0
 
 
-def test_validate_key():
+@pytest.mark.asyncio
+def test_validate_key(client):
     good_key = b'test:key:good_key'
-    validate_key(good_key)
+    client.validate_key(good_key)
 
     good_key = bytes('test:key:中文', encoding='utf-8')
-    validate_key(good_key)
+    client.validate_key(good_key)
 
     good_key = bytes('test:key:こんにちは', encoding='utf-8')
-    validate_key(good_key)
+    client.validate_key(good_key)
 
     good_key = bytes('test:key:안녕하세요', encoding='utf-8')
-    validate_key(good_key)
+    client.validate_key(good_key)
 
     good_key = bytes('test:key:!@#', encoding='utf-8')
-    validate_key(good_key)
+    client.validate_key(good_key)
 
     bad_key = 'this_is_string'
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
     bad_key = b'test:key:have space'
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
     bad_key = b'test:key:have_newline\r'
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
     bad_key = b'test:key:have_newline\n'
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
     bad_key = b'test:key:have_newline\nin_center'
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
     bad_key = b'test:key:too_long' + bytes(250)
     with pytest.raises(ValidationException):
-        validate_key(bad_key)
+        client.validate_key(bad_key)
 
 
-def test_uri_parser():
+@pytest.mark.asyncio
+def test_uri_parser(client):
     host = 'localhost'
     port = 11211
 
-    result = uri_parser('memcached://localhost:11211')
+    result = client.uri_parser('memcached://localhost:11211')
     assert result[0] == host
     assert result[1] == port
 
-    result = uri_parser('memcached://localhost')
+    result = client.uri_parser('memcached://localhost')
     assert result[0] == host
     assert result[1] == port
 
-    result = uri_parser('memcached://localhost:aaa')
+    result = client.uri_parser('memcached://localhost:aaa')
     assert result[0] == host
     assert result[1] == port
 
     with pytest.raises(ValidationException):
-        _ = uri_parser('BADmemcached://localhost')
+        _ = client.uri_parser('BADmemcached://localhost')
 
     _ = Client('memcached://localhost:11211')
 
@@ -551,3 +557,18 @@ async def test_flush_all(client):
     await run_func_with_mocked_execute_raw_cmd(
         client, b'NOT_OK\r\n', func
     )
+
+
+@pytest.mark.asyncio
+async def test_out_of_limit(client):
+    def generate_bytes(length):
+        return b''.join([b'0' for _ in range(length)])
+
+    key = generate_bytes(DEFAULT_MAX_KEY_LENGTH + 1)
+    value = generate_bytes(DEFAULT_MAX_VALUE_LENGTH + 1)
+
+    with pytest.raises(ValidationException):
+        await client.get(key)
+
+    with pytest.raises(ValidationException):
+        await client.set(key=b'key', value=value)

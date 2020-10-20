@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 from .constants import (
     DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT,
     DEFAULT_POOL_MINSIZE, DEFAULT_POOL_MAXSIZE,
-    DEFAULT_TIMEOUT, DEFAULT_KEY_LENGTH, DEFAULT_VALUE_LENGTH,
+    DEFAULT_TIMEOUT, DEFAULT_MAX_KEY_LENGTH, DEFAULT_MAX_VALUE_LENGTH,
 
     STORED, NOT_STORED, EXISTS, NOT_FOUND, DELETED, TOUCHED,
 
@@ -32,50 +32,14 @@ __all__ = ['Client']
 # key supports ascii sans space and control chars
 # \x21 is !, right after space, and \x7e is -, right before DEL
 # also 1 <= len <= 250 as per the spec
-_VALIDATE_KEY_RE = re.compile(b'^[^\x00-\x20\x7f]{1,%d}$' % DEFAULT_KEY_LENGTH)
+_VALIDATE_KEY_RE = re.compile(
+    b'^[^\x00-\x20\x7f]{1,%d}$' % DEFAULT_MAX_KEY_LENGTH)
 
 # URI: memcached://localhost:11211
 _URI_RE = re.compile(
     r'^memcached://(?P<host>[.a-z0-9_-]+|[0-9]+.[0-9]+.[0-9]+.[0-9]+)'
     r'(:(?P<port>[0-9]+))?'
 )
-
-
-def validate_key(key: bytes):
-    """A key (arbitrary string up to 250 bytes in length.
-    No space or newlines for ASCII mode)
-    """
-    if not isinstance(key, bytes):  # TODO maybe remove in next version?
-        raise ValidationException(
-            'key must be bytes:{}'.format(key))
-
-    m = _VALIDATE_KEY_RE.match(key)
-    if not m or len(m.group(0)) != len(key):
-        raise ValidationException(
-            'A key (arbitrary string up to 250 bytes in length. '
-            'No space or newlines for ASCII mode):{}'.format(key)
-        )
-
-    return key
-
-
-def uri_parser(uri: str) -> (str, Optional[int]):
-    m = re.match(_URI_RE, uri.lower())
-
-    try:
-        host = m.group('host')
-
-        port = m.group('port')
-        if port is None:
-            port = DEFAULT_SERVER_PORT
-
-        else:
-            port = int(port)
-
-    except AttributeError:
-        raise ValidationException('URI:{} parser failed!'.format(uri))
-
-    return host, port
 
 
 def acquire(func):
@@ -99,14 +63,14 @@ class Client(object):
         pool_minsize: int = DEFAULT_POOL_MINSIZE,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
         timeout: int = DEFAULT_TIMEOUT,
-        value_length: int = DEFAULT_VALUE_LENGTH,
+        value_length: int = DEFAULT_MAX_VALUE_LENGTH,
     ):
         if uri is None:
             self._host = host
             self._port = port
 
         else:
-            self._host, self._port = uri_parser(uri)
+            self._host, self._port = self.uri_parser(uri)
 
         self._timeout = timeout
         self._value_length = value_length
@@ -114,6 +78,49 @@ class Client(object):
             host=self._host, port=self._port,
             minsize=pool_minsize, maxsize=pool_maxsize
         )
+
+    @staticmethod
+    def uri_parser(uri: str) -> (str, int):
+        m = re.match(_URI_RE, uri.lower())
+
+        try:
+            host = m.group('host')
+
+            port = m.group('port')
+            if port is None:
+                port = DEFAULT_SERVER_PORT
+
+            else:
+                port = int(port)
+
+        except AttributeError:
+            raise ValidationException('URI:{} parser failed!'.format(uri))
+
+        return host, port
+
+    @staticmethod
+    def validate_key(key: bytes) -> None:
+        """A key (arbitrary string up to 250 bytes in length.
+        No space or newlines for ASCII mode)
+        """
+        if not isinstance(key, bytes):  # TODO maybe remove in next version?
+            raise ValidationException(
+                'key must be bytes:{}'.format(key))
+
+        m = _VALIDATE_KEY_RE.match(key)
+        if not m or len(m.group(0)) != len(key):
+            raise ValidationException(
+                'A key (arbitrary string up to 250 bytes in length. '
+                'No space or newlines for ASCII mode):{}'.format(key)
+            )
+
+        return
+
+    def validate_value(self, value: bytes):
+        if len(value) > self._value_length:
+            raise ValidationException(
+                'A value up to {} bytes in length.'.format(len(value))
+            )
 
     async def close(self):
         """Closes the sockets if its open."""
@@ -239,8 +246,9 @@ class Client(object):
     - "NOT_FOUND\r\n" to indicate that the item you are trying to store
     with a "cas" command did not exist.
         """
-        # validate key
-        validate_key(key)
+        # validate key, value
+        self.validate_key(key)
+        self.validate_value(value)
 
         if flags < 0 or exptime < 0:
             raise ValidationException(
@@ -274,11 +282,6 @@ class Client(object):
         self, key: bytes, value: bytes, flags: int = 0, exptime: int = 0
     ) -> bool:
         """"set" means "store this data"."""
-        if len(value) > self._value_length:
-            raise ValidationException(
-                'A value up to {} bytes in length.'.format(len(value))
-            )
-
         return await self._storage_command(
             cmd=b'set', key=key, value=value, flags=flags, exptime=exptime
         )
@@ -384,7 +387,7 @@ class Client(object):
         deleted by a client).
         """
         # validate keys
-        [validate_key(key) for key in keys]
+        [self.validate_key(key) for key in keys]
 
         cmd_format = b'gets %b\r\n' if with_cas else b'get %b\r\n'
         raw_cmd = cmd_format % b' '.join(keys)
@@ -537,7 +540,7 @@ class Client(object):
         of all existing items.
         """
         # validate key
-        validate_key(key)
+        self.validate_key(key)
 
         raw_cmd = b'delete %b\r\n' % key
         response_stream = await self._execute_raw_cmd(
@@ -603,7 +606,7 @@ class Client(object):
         optimization, so you also shouldn't rely on that.
         """
         # validate key
-        validate_key(key)
+        self.validate_key(key)
 
         if value < 0 or not isinstance(value, int):
             raise ValidationException(
@@ -681,7 +684,7 @@ The response line to this command can be one of:
   found.
         """
         # validate key
-        validate_key(key)
+        self.validate_key(key)
 
         raw_cmd = b'touch %b %d\r\n' % (key, exptime)
         response_stream = await self._execute_raw_cmd(
