@@ -24,7 +24,7 @@ from .exceptions import (
 """
 Ref: 
 - https://github.com/memcached/memcached/blob/master/doc/protocol.txt
-- # https://dzone.com/refcardz/getting-started-with-memcached
+- https://dzone.com/refcardz/getting-started-with-memcached
 """
 
 __all__ = ['Client']

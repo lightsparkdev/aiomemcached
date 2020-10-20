@@ -1,6 +1,10 @@
 CHANGES
 =======
 
+0.8.1
+__________________
+- Check value length, default max 1 megabyte
+
 0.8.0 (2020-09-08)
 ------------------
 - Rewrite almost code
