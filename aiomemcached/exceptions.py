@@ -2,8 +2,10 @@ __all__ = [
     'ClientException',
 
     'ValidationException',
-    'TimeoutException',
     'ResponseException',
+
+    'ConnectException',
+    'TimeoutException',
 ]
 
 
@@ -16,10 +18,6 @@ class ValidationException(ClientException):
     pass
 
 
-class TimeoutException(ClientException):
-    pass
-
-
 class ResponseException(ClientException):
     def __init__(self, raw_cmd, response, ext_message=None):
         message = 'Memcached::[{}] response is not expected:{}{}'.format(
@@ -28,3 +26,11 @@ class ResponseException(ClientException):
             response
         )
         super().__init__(message)
+
+
+class ConnectException(ClientException):
+    pass
+
+
+class TimeoutException(ConnectException):
+    pass

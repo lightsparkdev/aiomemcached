@@ -17,8 +17,9 @@ from .constants import (
 from .pool import MemcachedPool, MemcachedConnection
 from .exceptions import (
     ValidationException,
+    ResponseException,
+    ConnectException,
     TimeoutException,
-    ResponseException
 )
 
 """
@@ -145,6 +146,8 @@ class Client(object):
                 line = await asyncio.wait_for(
                     conn.reader.readline(), timeout=self._timeout
                 )
+            except ConnectionError as e:
+                raise ConnectException(e)
             except asyncio.TimeoutError as e:
                 raise TimeoutException(e)  # TODO test
 

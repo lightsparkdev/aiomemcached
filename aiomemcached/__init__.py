@@ -21,13 +21,16 @@ Usage example::
 
 from .client import Client
 from .exceptions import (
-    ClientException, ValidationException, TimeoutException, ResponseException
+    ClientException,
+    ValidationException, ResponseException,
+    ConnectException, TimeoutException,
 )
 
 __all__ = (
     'Client',
     'ClientException',
-    'ValidationException', 'TimeoutException', 'ResponseException'
+    'ValidationException', 'ResponseException',
+    'ConnectException', 'TimeoutException',
 )
 
 __name__ = 'AioMemcached'
