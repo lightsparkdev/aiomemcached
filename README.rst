@@ -13,7 +13,7 @@ AioMemcached
 .. image:: https://img.shields.io/pypi/dm/aiomemcached.svg
     :target: https://pypi.org/project/aiomemcached/
 
-A pure-Python(3.7+) asyncio memcached client, fork from aiomcache.
+A pure-Python(3.7+) zero-depend asyncio memcached client, fork from aiomcache.
 
 ============= =========================================
 Author        Nikolay Kim <fafhrd91@gmail.com>
