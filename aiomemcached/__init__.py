@@ -34,7 +34,7 @@ __all__ = (
 )
 
 __name__ = 'AioMemcached'
-__version__ = '0.8.1'
+__version__ = '0.8.2'
 
 __author__ = 'Nikolay Kim'
 __author_email__ = 'fafhrd91@gmail.com'

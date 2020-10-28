@@ -1,7 +1,11 @@
 CHANGES
 =======
 
-0.8.1
+0.8.2
+------------------
+- Catch more exception
+
+0.8.1 (2020-10-20)
 __________________
 - Check value length, default max 1 megabyte
 
