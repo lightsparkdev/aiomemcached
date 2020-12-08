@@ -2,74 +2,46 @@ import asyncio
 
 import aiomemcached
 
-KEY_1, KEY_2 = b'k1', b'k2'
-VALUE_1, VALUE_2 = b'1', b'v2'
-
 
 async def base_command():
     client = aiomemcached.Client()
 
-    print('--- version() ---')
-    print(await client.version())
+    print('client.version() =>', await client.version())
 
-    print()
+    print('\ninit key and value:')
+    k1, k2, v1, v2 = b'k1', b'k2', b'1', b'v2'
+    print("k1, k2, v1, v2 = b'k1', b'k2', b'1', b'2'")
+    keys = [k1, k2]
+    print("keys = [k1, k2]")
 
-    print('--- set(KEY1, VALUE_1), get(KEY_1) ---')
-    await client.set(KEY_1, VALUE_1)
-    value, info = await client.get(KEY_1)
-    print(value, info)
+    print('\nget and set key:')
+    print('client.set(k1, v1) =>', await client.set(k1, v1))
+    print('client.get(k1) =>', await client.get(k1))
+    print('client.set(k2, v2) =>', await client.set(k2, v2))
+    print('client.get(k2) =>', await client.get(k2))
 
-    print('--- after incr(KEY_1), get(KEY_1) ---')
-    await client.incr(KEY_1)
-    value, info = await client.get(KEY_1)
-    print(value, info)
+    print('\nincr and decr value:')
+    print('client.incr(k1) =>', await client.incr(k1))
+    print('client.decr(k1) =>', await client.decr(k1))
 
-    print('--- after decr(KEY_1), get(KEY_1) ---')
-    await client.decr(KEY_1)
-    value, info = await client.get(KEY_1)
-    print(value, info)
+    print('\nget multi key:')
+    print('client.get_many(keys) =>', await client.get_many(keys))
+    print('client.gets_many(keys) =>', await client.gets_many(keys))
+    print('client.set(k2, v2) =>', await client.set(k2, v2))
+    print('client.gets_many(keys) =>', await client.gets_many(keys))
 
-    print('--- gets(KEY_1) ---')
-    value, info = await client.gets(KEY_1)
-    print(value, info)
+    print('\ndelete key:')
+    print('client.delete(k1) =>', await client.delete(k1))
+    print('client.gets_many(keys) =>', await client.gets_many(keys))
 
-    print()
-    keys = [KEY_1, KEY_2]
+    print('\nappend value to key:')
+    print("client.append(k2, b'append') =>",
+          await client.append(k2, b'append'))
+    print('client.get(k2) =>', await client.get(k2))
 
-    print('--- get_many() ---')
-    values, info = await client.get_many(keys)
-    print(values, info)
-
-    print('--- gets_many() ---')
-    values, info = await client.gets_many(keys)
-    print(values, info)
-
-    print('--- after set(KEY2, VALUE_2), gets_many() ---')
-    await client.set(KEY_2, VALUE_2)
-    values, info = await client.gets_many(keys)
-    print(values, info)
-
-    print('--- after delete(KEY_1), gets_many() ---')
-    await client.delete(KEY_1)
-    value, info = await client.gets_many(keys)
-    print(value, info)
-
-    print()
-
-    print('--- set(KEY2, VALUE_2), get(KEY_2) ---')
-    await client.set(KEY_2, VALUE_2)
-    value, info = await client.get(KEY_2)
-    print(value, info)
-
-    print('--- after append(KEY_2, b"append"), get(KEY_2) ---')
-    await client.append(KEY_2, b'append')
-    value, info = await client.get(KEY_2)
-    print(value, info)
-
-    print('--- after flush_all(), get_many() ---')
-    await client.flush_all()
-    values, info = await client.get_many(keys)
-    print(values, info)
+    print('flush memcached:')
+    print('client.flush_all() =>', await client.flush_all())
+    print('client.get_many(keys) =>', await client.get_many(keys))
 
     return
 
