@@ -5,7 +5,7 @@ from collections import deque
 from .constants import DEFAULT_POOL_MAXSIZE, DEFAULT_POOL_MINSIZE
 from .exceptions import ConnectException
 
-__all__ = ['MemcachedPool', 'MemcachedConnection']
+__all__ = ["MemcachedPool", "MemcachedConnection"]
 
 
 class MemcachedConnection:
@@ -21,9 +21,11 @@ class MemcachedConnection:
 
 class MemcachedPool:
     def __init__(
-        self, host: str, port: int,
+        self,
+        host: str,
+        port: int,
         minsize: int = DEFAULT_POOL_MINSIZE,
-        maxsize: int = DEFAULT_POOL_MAXSIZE
+        maxsize: int = DEFAULT_POOL_MAXSIZE,
     ):
         self._host = host
         self._port = port
@@ -41,10 +43,8 @@ class MemcachedPool:
             await asyncio.sleep(1)
 
         try:
-            reader, writer = await asyncio.open_connection(
-                self._host, self._port
-            )
-        except(ConnectionError, TimeoutError, OSError) as e:
+            reader, writer = await asyncio.open_connection(self._host, self._port)
+        except (ConnectionError, TimeoutError, OSError) as e:
             raise ConnectException(e)
 
         return MemcachedConnection(reader, writer)
