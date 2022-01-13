@@ -32,7 +32,7 @@ from .exceptions import (
 )
 
 """
-Ref: 
+Ref:
 - https://github.com/memcached/memcached/blob/master/doc/protocol.txt
 - https://dzone.com/refcardz/getting-started-with-memcached
 """
