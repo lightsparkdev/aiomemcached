@@ -1,7 +1,9 @@
 # AioMemcached
 
-[![](https://travis-ci.org/rexzhang/aiomemcached.svg?branch=master)](https://travis-ci.org/rexzhang/aiomemcached)
-[![](https://img.shields.io/coveralls/rexzhang/aiomemcached.svg?branch=master)](https://coveralls.io/github/rexzhang/aiomemcached?branch=master)
+![GitHub](https://img.shields.io/github/license/rexzhang/aiomemcached)
+![Pytest Workflow Status](https://github.com/rexzhang/aiomemcached/actions/workflows/check-pytest.yml/badge.svg)
+[![codecov](https://codecov.io/gh/rexzhang/aiomemcached/branch/main/graph/badge.svg?token=UCO9BUNU6C)](https://codecov.io/gh/rexzhang/aiomemcached)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![](https://img.shields.io/pypi/v/aiomemcached.svg)](https://pypi.org/project/aiomemcached/)
 [![](https://img.shields.io/pypi/pyversions/aiomemcached.svg)](https://pypi.org/project/aiomemcached/)
 [![](https://img.shields.io/pypi/dm/aiomemcached.svg)](https://pypi.org/project/aiomemcached/)
