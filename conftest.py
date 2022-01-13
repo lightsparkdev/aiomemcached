@@ -2,10 +2,7 @@ import pytest
 
 import aiomemcached
 
-DEFAULT_CLIENT_PARAMS = dict(
-    host='localhost',
-    port=11211
-)
+DEFAULT_CLIENT_PARAMS = dict(host="localhost", port=11211)
 
 
 # mcache_server_option = None

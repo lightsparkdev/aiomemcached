@@ -25,7 +25,8 @@ async def test_pool_acquire_release(mcache_params):
 async def test_pool_acquire_release2(mcache_params):
     pool = MemcachedPool(minsize=1, maxsize=5, **mcache_params)
     reader, writer = await asyncio.open_connection(
-        mcache_params['host'], mcache_params['port'])
+        mcache_params["host"], mcache_params["port"]
+    )
     # put dead connection to the pool
     writer.close()
     reader.feed_eof()
@@ -92,8 +93,8 @@ async def test_acquire_task_cancellation(
     class Client:
         def __init__(self, pool_size=4):
             self._pool = MemcachedPool(
-                minsize=pool_size, maxsize=pool_size,
-                **mcache_params)
+                minsize=pool_size, maxsize=pool_size, **mcache_params
+            )
 
         @acquire
         async def acquire_wait_release(self, conn):
@@ -104,12 +105,10 @@ async def test_acquire_task_cancellation(
     pool_size = 4
     client = Client(pool_size=pool_size)
     tasks = [
-        asyncio.wait_for(
-            client.acquire_wait_release(),
-            random.uniform(1, 2)) for x in range(1000)
+        asyncio.wait_for(client.acquire_wait_release(), random.uniform(1, 2))
+        for x in range(1000)
     ]
-    results = await asyncio.gather(
-        *tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
     assert client._pool.size() <= pool_size
     assert "foo" in results
 
