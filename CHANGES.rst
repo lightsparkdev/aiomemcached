@@ -1,6 +1,10 @@
 CHANGES
 =======
 
+0.8.3 (2022-01-13)
+------------------
+- No real change, just release
+
 0.8.2 (2020-10-28)
 ------------------
 - Catch more exception
