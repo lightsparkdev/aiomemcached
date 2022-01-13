@@ -47,7 +47,6 @@ install_requires = _read_install_requires_from_requirements_txt(
     base_path=here, filename="requirements/base.txt"
 )
 
-tests_require = install_requires + ["nose"]
 
 setup(
     # This is the name of your project. The first time you publish this
@@ -191,7 +190,7 @@ setup(
     #         'python_module_project=python_module_project:main',
     #     ],
     # },
-    tests_require=tests_require,
-    test_suite="nose.collector",
+    # tests_require=tests_require,
+    # test_suite="nose.collector",
     include_package_data=True,
 )
