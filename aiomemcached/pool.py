@@ -89,6 +89,16 @@ class MemcachedPool:
         finally:
             self._pool_lock.release()
 
+    async def dispose(self, conn: MemcachedConnection) -> None:
+        """Closes and disposes of the connection."""
+        if conn in self._pool:
+            self._pool.remove(conn)
+
+        try:
+            await conn.close()
+        except ConnectionError:
+            pass
+
     async def clear(self) -> None:
         """Clear pool connections.
         Close and remove all free connections.

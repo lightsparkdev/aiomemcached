@@ -58,6 +58,10 @@ def acquire(func):
         try:
             return await func(self, conn, *args, **kwargs)
 
+        except (ConnectionError, ConnectException):
+            await self._pool.dispose(conn)
+            raise
+
         finally:
             await self._pool.release(conn)
 
