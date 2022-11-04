@@ -77,6 +77,7 @@ class Client(object):
         pool_minsize: int = DEFAULT_POOL_MINSIZE,
         pool_maxsize: int = DEFAULT_POOL_MAXSIZE,
         timeout: int = DEFAULT_TIMEOUT,
+        connect_timeout: int = DEFAULT_TIMEOUT,
         value_length: int = DEFAULT_MAX_VALUE_LENGTH,
     ):
         if uri is None:
@@ -89,7 +90,11 @@ class Client(object):
         self._timeout = timeout
         self._value_length = value_length
         self._pool = MemcachedPool(
-            host=self._host, port=self._port, minsize=pool_minsize, maxsize=pool_maxsize
+            host=self._host,
+            port=self._port,
+            minsize=pool_minsize,
+            maxsize=pool_maxsize,
+            connect_timeout=connect_timeout,
         )
 
     @staticmethod

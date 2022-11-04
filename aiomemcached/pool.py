@@ -2,7 +2,7 @@ import asyncio
 from asyncio.streams import StreamReader, StreamWriter
 from collections import deque
 
-from .constants import DEFAULT_POOL_MAXSIZE, DEFAULT_POOL_MINSIZE
+from .constants import DEFAULT_POOL_MAXSIZE, DEFAULT_POOL_MINSIZE, DEFAULT_TIMEOUT
 from .exceptions import ConnectException
 
 __all__ = ["MemcachedPool", "MemcachedConnection"]
@@ -26,9 +26,11 @@ class MemcachedPool:
         port: int,
         minsize: int = DEFAULT_POOL_MINSIZE,
         maxsize: int = DEFAULT_POOL_MAXSIZE,
+        connect_timeout: int = DEFAULT_TIMEOUT,
     ):
         self._host = host
         self._port = port
+        self._connect_timeout = connect_timeout
 
         self._pool = deque()
         self._pool_minsize = minsize
@@ -43,7 +45,10 @@ class MemcachedPool:
             await asyncio.sleep(1)
 
         try:
-            reader, writer = await asyncio.open_connection(self._host, self._port)
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self._host, self._port),
+                timeout=self._connect_timeout,
+            )
         except (ConnectionError, TimeoutError, OSError) as e:
             raise ConnectException(e)
 
