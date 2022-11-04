@@ -25,9 +25,9 @@ class ResponseException(ClientException):
         super().__init__(message)
 
 
-class ConnectException(ClientException):
+class ConnectException(ClientException, ConnectionError):
     pass
 
 
-class TimeoutException(ConnectException):
+class TimeoutException(ConnectException, TimeoutError):
     pass
